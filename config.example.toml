@@ -1,0 +1,10 @@
+[embedding]
+provider   = "local"              # local | ollama | openai
+model      = "all-MiniLM-L6-v2"  # sentence-transformers model name
+# url      = "http://localhost:11434"   # ollama only
+# api_key  = "sk-..."                   # openai only
+batch_size = 32
+
+[query]
+top_k  = 5
+output = "text"                   # text | json
