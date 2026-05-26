@@ -1,20 +1,54 @@
 # perag
 
-A personal RAG (Retrieval-Augmented Generation) toolkit for non-developers who work
-with textual documents. It provides a local, private pipeline that lets you ask
-questions across a collection of PDF, Word, Markdown, and plain-text files.
+You have a folder of documents — contracts, reports, research notes, meeting minutes —
+and you want to ask questions across all of them. Not just search for a keyword, but
+ask a real question and get an answer that draws on what is actually written in those
+files.
 
-No server. No cloud. No daemon. Runs locally, stores data locally.
+`perag` makes that possible. You point it at your documents, it reads and indexes them
+on your machine, and from then on you — or an AI assistant like Claude — can query
+them in plain language. Everything stays on your computer. Nothing is sent to a cloud
+service. No account required.
+
+## How it works with an AI assistant
+
+Install `perag` and run `perag init` once. After that, just talk to your AI assistant
+as you normally would:
+
+- "Remember this contract — I'll want to ask questions about it later."
+- "What does the NDA say about liability?"
+- "Find everything in my notes about the Q3 budget."
+
+The assistant remembers your documents, finds the relevant passages, and gives you
+accurate answers grounded in what is actually written — not guesses. Everything stays
+on your computer. Nothing is sent to a cloud service. No account required.
+
+You can also run `perag` directly from the terminal if you prefer.
 
 ---
 
 ## Installation
 
+`perag` is a Python program. You need Python 3.11 or later installed on your computer.
+If you are not sure whether you have it, open a terminal and type `python3 --version`.
+If Python is missing or too old, download it from [python.org](https://www.python.org/downloads/).
+
+Once Python is available, install `perag` using one of the two standard Python package
+managers:
+
+### With uv (recommended)
+
+`uv` is a fast, modern Python package manager. If you do not have it yet, install it
+by following the instructions at [docs.astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation/) —
+it is a one-line command for macOS, Linux, and Windows.
+
 ```bash
 uv tool install perag
 ```
 
-Or with pip:
+### With pip
+
+`pip` comes bundled with Python. No separate installation needed.
 
 ```bash
 pip install perag
@@ -24,19 +58,23 @@ pip install perag
 
 ## Quick start
 
+There is only one thing you need to do yourself: run `perag init` once in the folder
+where your documents live. This sets everything up — your AI assistant handles the
+rest automatically.
+
 ```bash
-# 1. Initialize a collection in the current directory
 perag init
-
-# 2. Add documents
-perag chunk report.pdf notes.md | perag embed | perag ingest
-
-# 3. Ask a question
-perag query "what are the termination conditions?"
-
-# 4. Check what's in the collection
-perag status --full
 ```
+
+After that, tell your AI assistant what you want:
+
+> "Remember report.pdf — I'll want to ask questions about it."
+> "What are the termination conditions in the contract?"
+> "What changed in my notes since last week?"
+
+The assistant reads the skill description that `perag init` installs and knows how to
+add documents, search them, and keep track of what has changed. You do not need to
+learn the individual commands.
 
 ---
 
@@ -98,7 +136,7 @@ perag ls --new            # not yet in the database
 perag ls --stale          # changed since last ingest
 perag ls --ok             # up to date
 perag ls --missing        # in database but deleted from disk
-perag ls -R               # recurse into subdirectories
+perag ls --recurse        # recurse into subdirectories (short: -R)
 perag ls --new --stale    # combine flags (OR)
 perag ls docs/ *.md       # scan specific paths
 ```
@@ -147,6 +185,16 @@ perag prune
 perag config
 perag status --full
 ```
+
+> **Large collections:** each pipeline invocation holds all chunks in memory at once.
+> If you have hundreds of files, ingest them one at a time using a shell loop to avoid
+> high memory use:
+>
+> ```bash
+> for f in docs/*.pdf; do
+>     perag chunk "$f" | perag embed | perag ingest
+> done
+> ```
 
 ---
 
