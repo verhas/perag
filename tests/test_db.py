@@ -97,6 +97,29 @@ def test_ingest_updates_file_hash_on_reingest(db):
     assert row["file_hash"] == "newhash"
 
 
+def test_prune_removes_missing_files(db, tmp_path):
+    from perag.db.store import ingest, prune
+
+    # Ingest a chunk whose source file exists
+    existing = tmp_path / "exists.txt"
+    existing.write_text("hello")
+    chunk = _make_chunk(0, source=str(existing))
+    ingest(db, [chunk])
+
+    # Ingest a chunk whose source file will be deleted
+    gone = tmp_path / "gone.txt"
+    gone.write_text("bye")
+    chunk2 = _make_chunk(1, source=str(gone))
+    ingest(db, [chunk2])
+    gone.unlink()
+
+    pruned = prune(db)
+    assert pruned == [str(gone)]
+
+    remaining = db.execute("SELECT source FROM files").fetchall()
+    assert [r["source"] for r in remaining] == [str(existing)]
+
+
 def test_ingest_warns_on_conflicting_hashes(db):
     import warnings
     from perag.db.store import ingest

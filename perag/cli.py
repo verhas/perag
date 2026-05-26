@@ -191,6 +191,36 @@ def init_cmd() -> None:
     err.print(f"[green]Done.[/green] Database will be created at {perag_dir / 'perag.db'} on first ingest.")
 
 
+@app.command()
+def prune() -> None:
+    """Remove database entries for files that no longer exist on disk."""
+    from perag.db.store import init_db, prune as db_prune
+
+    db_path = find_db_path()
+    if not db_path.exists():
+        err.print("[yellow]No database found — nothing to prune.[/yellow]")
+        return
+
+    try:
+        conn = init_db(db_path)
+    except RuntimeError as e:
+        err.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    try:
+        pruned = db_prune(conn)
+    finally:
+        conn.close()
+
+    if not pruned:
+        err.print("[dim]Nothing to prune — all files accounted for.[/dim]")
+        return
+
+    for source in pruned:
+        err.print(f"[red]Pruned[/red] {source}")
+    err.print(f"\n[green]Done.[/green] Removed {len(pruned)} file(s) from the database.")
+
+
 @app.command(name="ls")
 def ls_cmd(
     paths: Annotated[list[Path] | None, typer.Argument(help="Files or directories to scan (default: current directory)")] = None,

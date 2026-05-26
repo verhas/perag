@@ -54,6 +54,33 @@ def init_db(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def prune(conn: sqlite3.Connection) -> list[str]:
+    """Remove all DB entries for files that no longer exist on disk.
+
+    Returns the list of sources that were pruned.
+    """
+    from pathlib import Path
+
+    records = get_file_records(conn)
+    pruned = [source for source in records if not Path(source).exists()]
+
+    for source in pruned:
+        existing = conn.execute(
+            "SELECT id FROM chunks WHERE source = ?", (source,)
+        ).fetchall()
+        for row in existing:
+            conn.execute(
+                "DELETE FROM chunk_vectors WHERE rowid = "
+                "(SELECT rowid FROM chunks WHERE id = ?)",
+                (row["id"],),
+            )
+        conn.execute("DELETE FROM chunks WHERE source = ?", (source,))
+        conn.execute("DELETE FROM files WHERE source = ?", (source,))
+
+    conn.commit()
+    return pruned
+
+
 def get_file_records(conn: sqlite3.Connection) -> dict[str, str]:
     """Return {source: file_hash} for all files recorded in the database."""
     rows = conn.execute("SELECT source, file_hash FROM files").fetchall()
