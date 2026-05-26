@@ -10,7 +10,7 @@ class MarkdownChunker(Chunker):
     """Splits Markdown at top-level headings (h1/h2). Falls back to paragraph chunks."""
 
     def chunk(self, path: Path) -> list[Chunk]:
-        source = str(path)
+        source = str(path.resolve())
         file_hash = md5(path)
         text = path.read_text(encoding="utf-8")
         md = MarkdownIt()

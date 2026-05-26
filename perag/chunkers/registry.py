@@ -6,6 +6,10 @@ from perag.chunkers.markdown import MarkdownChunker
 from perag.chunkers.pdf import PdfChunker
 from perag.chunkers.text import TextChunker
 
+SUPPORTED_EXTENSIONS: frozenset[str] = frozenset({
+    ".pdf", ".docx", ".doc", ".md", ".markdown", ".txt", ".text",
+})
+
 _REGISTRY: dict[str, type[Chunker]] = {
     ".pdf": PdfChunker,
     ".docx": DocxChunker,

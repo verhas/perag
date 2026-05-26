@@ -54,6 +54,12 @@ def init_db(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def get_file_records(conn: sqlite3.Connection) -> dict[str, str]:
+    """Return {source: file_hash} for all files recorded in the database."""
+    rows = conn.execute("SELECT source, file_hash FROM files").fetchall()
+    return {r["source"]: r["file_hash"] for r in rows}
+
+
 def _get_meta(conn: sqlite3.Connection) -> dict[str, str]:
     rows = conn.execute("SELECT key, value FROM meta").fetchall()
     return {r["key"]: r["value"] for r in rows}

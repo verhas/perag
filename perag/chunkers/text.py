@@ -12,7 +12,7 @@ class TextChunker(Chunker):
     short paragraphs up to _MAX_CHARS with a small overlap between chunks."""
 
     def chunk(self, path: Path) -> list[Chunk]:
-        source = str(path)
+        source = str(path.resolve())
         file_hash = md5(path)
         text = path.read_text(encoding="utf-8")
         paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]

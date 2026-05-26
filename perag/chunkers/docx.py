@@ -12,7 +12,7 @@ class DocxChunker(Chunker):
     """Groups paragraphs into chunks of ~_CHUNK_PARAS non-empty paragraphs."""
 
     def chunk(self, path: Path) -> list[Chunk]:
-        source = str(path)
+        source = str(path.resolve())
         file_hash = md5(path)
         doc = Document(path)
 

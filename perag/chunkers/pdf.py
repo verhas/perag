@@ -12,7 +12,7 @@ class PdfChunker(Chunker):
     """One chunk per page; merges pages with fewer than _MIN_CHARS into the next."""
 
     def chunk(self, path: Path) -> list[Chunk]:
-        source = str(path)
+        source = str(path.resolve())
         file_hash = md5(path)
         chunks: list[Chunk] = []
         pending_text = ""

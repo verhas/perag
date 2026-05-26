@@ -191,6 +191,123 @@ def init_cmd() -> None:
     err.print(f"[green]Done.[/green] Database will be created at {perag_dir / 'perag.db'} on first ingest.")
 
 
+@app.command(name="ls")
+def ls_cmd(
+    paths: Annotated[list[Path] | None, typer.Argument(help="Files or directories to scan (default: current directory)")] = None,
+    new: Annotated[bool, typer.Option("--new", "-n", help="Show files not yet in the database")] = False,
+    stale: Annotated[bool, typer.Option("--stale", "-s", help="Show files modified since last ingest")] = False,
+    ok: Annotated[bool, typer.Option("--ok", "-o", help="Show files that are up to date")] = False,
+    missing: Annotated[bool, typer.Option("--missing", "-m", help="Show database entries whose file no longer exists")] = False,
+    recurse: Annotated[bool, typer.Option("--recurse", "-R", help="Recurse into directories")] = False,
+) -> None:
+    """List files and their status relative to the database."""
+    from perag.chunkers.base import md5
+    from perag.chunkers.registry import SUPPORTED_EXTENSIONS
+    from perag.db.store import get_file_records, init_db
+
+    # No flags → show everything
+    any_flag = new or stale or ok or missing
+    show_new     = new     or not any_flag
+    show_stale   = stale   or not any_flag
+    show_ok      = ok      or not any_flag
+    show_missing = missing or not any_flag
+
+    # Load DB records
+    db_path = find_db_path()
+    file_records: dict[str, str] = {}
+    if db_path.exists():
+        try:
+            conn = init_db(db_path)
+            file_records = get_file_records(conn)
+            conn.close()
+        except RuntimeError as e:
+            err.print(f"[red]Error:[/red] {e}")
+            raise typer.Exit(1)
+
+    # Collect files from disk
+    scan_paths = paths or [Path.cwd()]
+    disk_files: list[str] = []
+    for path in scan_paths:
+        if path.is_file():
+            if path.suffix.lower() in SUPPORTED_EXTENSIONS:
+                disk_files.append(str(path))
+        elif path.is_dir():
+            glob = "**/*" if recurse else "*"
+            for f in sorted(path.glob(glob)):
+                if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS:
+                    disk_files.append(str(f))
+        else:
+            err.print(f"[yellow]Warning:[/yellow] path not found: {path}")
+
+    # Classify disk files
+    results: list[tuple[str, str]] = []  # (status, path)
+    for path_str in disk_files:
+        if path_str in file_records:
+            current_hash = md5(Path(path_str))
+            if current_hash == file_records[path_str]:
+                if show_ok:
+                    results.append(("OK", path_str))
+            else:
+                if show_stale:
+                    results.append(("STALE", path_str))
+        else:
+            if show_new:
+                results.append(("NEW", path_str))
+
+    # Missing: DB records not found on disk (not limited to scanned dirs)
+    if show_missing:
+        disk_set = set(disk_files)
+        for source in sorted(file_records):
+            if not Path(source).exists():
+                results.append(("MISSING", source))
+
+    if sys.stdout.isatty():
+        _ls_tty(results)
+    else:
+        _ls_pipe(results)
+
+
+_STATUS_STYLE = {
+    "NEW":     "green",
+    "STALE":   "yellow",
+    "OK":      "dim",
+    "MISSING": "red",
+}
+
+
+def _ls_tty(results: list[tuple[str, str]]) -> None:
+    from rich.console import Console as RichConsole
+    from rich.table import Table
+
+    out = RichConsole()
+    if not results:
+        out.print("[dim]No matching files.[/dim]")
+        return
+
+    table = Table(show_header=True, header_style="bold", box=None, pad_edge=False, show_edge=False)
+    table.add_column("Status", width=9)
+    table.add_column("Path")
+    for status, path in results:
+        style = _STATUS_STYLE[status]
+        table.add_row(f"[{style}]{status}[/{style}]", path)
+
+    out.print(table)
+    counts: dict[str, int] = {}
+    for status, _ in results:
+        counts[status] = counts.get(status, 0) + 1
+    summary = "  ".join(
+        f"[{_STATUS_STYLE[s]}]{counts[s]} {s.lower()}[/{_STATUS_STYLE[s]}]"
+        for s in ("NEW", "STALE", "OK", "MISSING")
+        if s in counts
+    )
+    out.print(f"\n{summary}")
+
+
+def _ls_pipe(results: list[tuple[str, str]]) -> None:
+    for status, path in results:
+        print(path)
+
+
 @app.command()
 def query(
     text: Annotated[str, typer.Argument(help="Query text")],
