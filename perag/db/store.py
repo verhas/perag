@@ -81,6 +81,23 @@ def prune(conn: sqlite3.Connection) -> list[str]:
     return pruned
 
 
+def get_stats(conn: sqlite3.Connection) -> dict:
+    """Return summary statistics from the database."""
+    file_count = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+    chunk_count = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    last_ingest = conn.execute(
+        "SELECT MAX(ingested_at) FROM files"
+    ).fetchone()[0]
+    meta = _get_meta(conn)
+    return {
+        "file_count": file_count,
+        "chunk_count": chunk_count,
+        "last_ingest": last_ingest,
+        "embedding_model": meta.get("embedding_model"),
+        "embedding_provider": meta.get("embedding_provider"),
+    }
+
+
 def get_file_records(conn: sqlite3.Connection) -> dict[str, str]:
     """Return {source: file_hash} for all files recorded in the database."""
     rows = conn.execute("SELECT source, file_hash FROM files").fetchall()

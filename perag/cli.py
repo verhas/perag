@@ -192,6 +192,135 @@ def init_cmd() -> None:
 
 
 @app.command()
+def config() -> None:
+    """Show the active configuration."""
+    from rich.table import Table
+    from rich.console import Console as RichConsole
+
+    cfg = load_config()
+    db_path = find_db_path()
+
+    global_cfg_path = Path.home() / ".perag" / "config.toml"
+    local_cfg_path = Path.cwd() / ".perag" / "config.toml"
+
+    out = RichConsole()
+
+    # Config file sources
+    out.print("[bold]Config files[/bold]")
+    for label, path in [("global", global_cfg_path), ("local", local_cfg_path)]:
+        if path.exists():
+            out.print(f"  [green]✓[/green] {label}: {path}")
+        else:
+            out.print(f"  [dim]–[/dim] {label}: {path} [dim](not found)[/dim]")
+
+    # Effective settings
+    out.print("\n[bold]Effective settings[/bold]")
+    table = Table(show_header=False, box=None, pad_edge=False, show_edge=False)
+    table.add_column(style="dim", width=20)
+    table.add_column()
+
+    table.add_row("embedding.provider", cfg.embedding.provider)
+    table.add_row("embedding.model", cfg.embedding.model)
+    if cfg.embedding.provider == "ollama":
+        table.add_row("embedding.url", cfg.embedding.url)
+    if cfg.embedding.provider == "openai":
+        table.add_row("embedding.api_key", "***" if cfg.embedding.api_key else "[red]not set[/red]")
+    table.add_row("embedding.batch_size", str(cfg.embedding.batch_size))
+    table.add_row("query.top_k", str(cfg.query.top_k))
+    table.add_row("query.output", cfg.query.output)
+    table.add_row("database", str(db_path))
+
+    out.print(table)
+
+
+@app.command()
+def status(
+    full: Annotated[bool, typer.Option("--full", help="Include file system scan for stale/new/missing counts")] = False,
+    recurse: Annotated[bool, typer.Option("--recurse", "-R", help="Recurse into directories (with --full)")] = False,
+) -> None:
+    """Show database statistics and health summary."""
+    from rich.console import Console as RichConsole
+    from rich.table import Table
+    from perag.db.store import get_stats, get_file_records, init_db
+
+    out = RichConsole()
+    db_path = find_db_path()
+
+    if not db_path.exists():
+        out.print("[yellow]No database found.[/yellow] Run [bold]perag ingest[/bold] first.")
+        return
+
+    try:
+        conn = init_db(db_path)
+    except RuntimeError as e:
+        err.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    try:
+        stats = get_stats(conn)
+        file_records = get_file_records(conn) if full else {}
+    finally:
+        conn.close()
+
+    db_size = db_path.stat().st_size
+    db_size_str = (
+        f"{db_size / 1_048_576:.1f} MB" if db_size >= 1_048_576
+        else f"{db_size / 1024:.1f} KB"
+    )
+
+    out.print("[bold]Database[/bold]")
+    table = Table(show_header=False, box=None, pad_edge=False, show_edge=False)
+    table.add_column(style="dim", width=22)
+    table.add_column()
+    table.add_row("location", str(db_path))
+    table.add_row("size", db_size_str)
+    table.add_row("embedding model", stats["embedding_model"] or "[dim]none[/dim]")
+    table.add_row("embedding provider", stats["embedding_provider"] or "[dim]none[/dim]")
+    table.add_row("files tracked", str(stats["file_count"]))
+    table.add_row("chunks", str(stats["chunk_count"]))
+    table.add_row("last ingest", stats["last_ingest"] or "[dim]never[/dim]")
+    out.print(table)
+
+    if not full:
+        out.print("\n[dim]Run [bold]perag status --full[/bold] for file system counts.[/dim]")
+        return
+
+    # Disk scan
+    from perag.chunkers.base import md5
+    from perag.chunkers.registry import SUPPORTED_EXTENSIONS
+
+    glob = "**/*" if recurse else "*"
+    disk_files = {
+        str(f.resolve())
+        for f in Path.cwd().glob(glob)
+        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
+    }
+
+    n_ok = n_stale = n_new = n_missing = 0
+    for path_str in disk_files:
+        if path_str in file_records:
+            if md5(Path(path_str)) == file_records[path_str]:
+                n_ok += 1
+            else:
+                n_stale += 1
+        else:
+            n_new += 1
+    for source in file_records:
+        if not Path(source).exists():
+            n_missing += 1
+
+    out.print("\n[bold]File system[/bold]")
+    fs_table = Table(show_header=False, box=None, pad_edge=False, show_edge=False)
+    fs_table.add_column(style="dim", width=22)
+    fs_table.add_column()
+    fs_table.add_row("[green]ok[/green]",      f"[green]{n_ok}[/green]")
+    fs_table.add_row("[yellow]stale[/yellow]",  f"[yellow]{n_stale}[/yellow]")
+    fs_table.add_row("[red]missing[/red]",      f"[red]{n_missing}[/red]")
+    fs_table.add_row("[cyan]new[/cyan]",        f"[cyan]{n_new}[/cyan]")
+    out.print(fs_table)
+
+
+@app.command()
 def prune() -> None:
     """Remove database entries for files that no longer exist on disk."""
     from perag.db.store import init_db, prune as db_prune
