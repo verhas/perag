@@ -219,3 +219,5 @@ __marimo__/
 /.claude/
 /.perag/
 /.venv/
+
+.perag/perag.db

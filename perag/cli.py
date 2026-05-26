@@ -128,6 +128,9 @@ def ingest() -> None:
 @app.command(name="init")
 def init_cmd() -> None:
     """Initialize a .perag/ directory in the current working directory."""
+    import importlib.resources
+    import shutil
+
     perag_dir = Path.cwd() / ".perag"
     config_path = perag_dir / "config.toml"
 
@@ -145,7 +148,6 @@ def init_cmd() -> None:
                 "# model = \"all-MiniLM-L6-v2\"\n"
             )
         else:
-            import tomllib, shutil
             example = Path(__file__).parent.parent / "config.example.toml"
             shutil.copy(example, config_path)
         err.print(f"[green]Created[/green] {config_path}")
@@ -158,6 +160,14 @@ def init_cmd() -> None:
             with open(gitignore, "a") as f:
                 f.write(f"\n{entry}\n")
             err.print(f"[green]Added[/green] '{entry}' to .gitignore")
+
+    skills_dir = Path.home() / ".claude" / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    skill_dest = skills_dir / "perag.md"
+    skill_src = importlib.resources.files("perag.data").joinpath("SKILL.md")
+    with importlib.resources.as_file(skill_src) as src:
+        shutil.copy(src, skill_dest)
+    err.print(f"[green]Installed[/green] Claude Code skill → {skill_dest}")
 
     err.print(f"[green]Done.[/green] Database will be created at {perag_dir / 'perag.db'} on first ingest.")
 
