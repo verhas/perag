@@ -5,6 +5,7 @@
 `perag` is a local RAG tool. Use it to:
 1. **Ingest documents** the user wants to store in their personal knowledge base
 2. **Query the knowledge base** to retrieve relevant context before answering questions
+3. **Manage the collection** — check status, list files, prune deleted entries
 
 ---
 
@@ -46,10 +47,21 @@ You can now ask me questions about it."
 ### Ingesting multiple files
 
 ```bash
-for f in docs/*.pdf; do perag chunk "$f" | perag embed | perag ingest; done
+perag chunk report.pdf notes.md summary.txt | perag embed | perag ingest
 ```
 
-Or pipe files one at a time if you want to report progress per file.
+### Ingesting new or changed files only
+
+```bash
+# New files not yet in the database
+perag chunk $(perag ls --new) | perag embed | perag ingest
+
+# Files changed since last ingest
+perag chunk $(perag ls --stale) | perag embed | perag ingest
+
+# Both at once
+perag chunk $(perag ls --new --stale) | perag embed | perag ingest
+```
 
 ### Re-ingesting an updated file
 
@@ -85,6 +97,43 @@ perag query "question" --json   # structured output if needed
 
 ---
 
+## Managing the collection
+
+### Check status
+
+```bash
+perag status          # quick summary: file count, chunk count, last ingest
+perag status --full   # adds ok/stale/missing/new counts from disk scan
+perag status --full -R  # recursive scan
+```
+
+### List files by status
+
+```bash
+perag ls              # all files: ok, stale, new, missing
+perag ls --new        # files on disk not yet in the database
+perag ls --stale      # files changed since last ingest
+perag ls --ok         # files that are up to date
+perag ls --missing    # database entries whose file no longer exists
+perag ls -R           # recurse into subdirectories
+```
+
+### Remove stale database entries
+
+When files have been deleted from disk, clean up their database entries:
+
+```bash
+perag prune
+```
+
+### Show active configuration
+
+```bash
+perag config
+```
+
+---
+
 ## Initializing a new collection
 
 If `.perag/` does not exist in the current directory:
@@ -93,8 +142,8 @@ If `.perag/` does not exist in the current directory:
 perag init
 ```
 
-This creates `.perag/config.toml` and registers `.perag/perag.db` in `.gitignore`.
-Run this before the first ingest in any new directory.
+This creates `.perag/config.toml`, registers `.perag/perag.db` in `.gitignore`,
+and installs this skill into `~/.claude/skills/perag.md`.
 
 ---
 
@@ -116,5 +165,6 @@ Multiple results are separated by blank lines.
 - The database is at `.perag/perag.db` (local) or `~/.perag/perag.db` (global fallback)
 - Config is at `.perag/config.toml` or `~/.perag/config.toml`
 - `perag chunk` and `perag embed` write to stdout; `perag ingest` confirms to stderr
+- `perag ls` outputs one filename per line when piped — suitable for `$()`
 - Ingesting a document fully replaces its previous chunks — safe to re-run after edits
 - Embedding runs locally by default (no API key or running service needed)

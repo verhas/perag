@@ -28,11 +28,14 @@ pip install perag
 # 1. Initialize a collection in the current directory
 perag init
 
-# 2. Add a document
-perag chunk report.pdf | perag embed | perag ingest
+# 2. Add documents
+perag chunk report.pdf notes.md | perag embed | perag ingest
 
 # 3. Ask a question
 perag query "what are the termination conditions?"
+
+# 4. Check what's in the collection
+perag status --full
 ```
 
 ---
@@ -41,28 +44,26 @@ perag query "what are the termination conditions?"
 
 ### `perag init`
 
-Creates a `.perag/` directory in the current directory and writes a starter
-`config.toml`. Safe to re-run — never overwrites an existing config.
+Creates a `.perag/` directory, writes a starter `config.toml`, adds `.perag/perag.db`
+to `.gitignore`, and installs the Claude Code skill into `~/.claude/skills/perag.md`.
+Safe to re-run — never overwrites an existing config.
 
-```bash
-perag init
-```
+### `perag chunk <file> [<file> ...]`
 
-### `perag chunk <file>`
-
-Splits a document into chunks and writes JSON to stdout.
+Splits one or more documents into chunks and writes JSON to stdout.
 
 ```bash
 perag chunk contract.pdf
-perag chunk notes.md
-perag chunk report.docx
+perag chunk notes.md summary.txt report.docx
+perag chunk *.md
 ```
 
 Supported formats: `.pdf` `.docx` `.doc` `.md` `.markdown` `.txt` `.text`
 
 ### `perag embed`
 
-Reads chunks from stdin, adds embedding vectors, writes JSON to stdout.
+Reads chunks from stdin, adds embedding vectors, writes JSON to stdout. Shows a
+spinner during model loading and embedding.
 
 ```bash
 perag chunk notes.md | perag embed
@@ -70,14 +71,12 @@ perag chunk notes.md | perag embed
 
 ### `perag ingest`
 
-Reads embedded chunks from stdin and stores them in the local database.
+Reads embedded chunks from stdin and stores them in the local database. Re-ingesting
+a document fully replaces its previous chunks.
 
 ```bash
 perag chunk notes.md | perag embed | perag ingest
 ```
-
-Re-ingesting a document you've already added replaces its previous chunks — safe
-to run again after editing a file.
 
 ### `perag query "<text>"`
 
@@ -88,23 +87,75 @@ perag query "what is the notice period for termination?"
 perag query "budget for Q3" --json   # structured JSON output
 ```
 
----
+### `perag ls [paths...] [flags]`
 
-## Full pipeline
+Lists files and their status relative to the database. When piped, outputs one
+filename per line — suitable for use with `$()`.
 
 ```bash
-# Piped — simplest
-perag chunk document.pdf | perag embed | perag ingest
+perag ls                  # all files: ok, stale, new, missing
+perag ls --new            # not yet in the database
+perag ls --stale          # changed since last ingest
+perag ls --ok             # up to date
+perag ls --missing        # in database but deleted from disk
+perag ls -R               # recurse into subdirectories
+perag ls --new --stale    # combine flags (OR)
+perag ls docs/ *.md       # scan specific paths
+```
 
-# With intermediate files — useful for debugging
+### `perag status`
+
+Shows a summary of the database and collection health.
+
+```bash
+perag status          # fast: file count, chunk count, model, last ingest, db size
+perag status --full   # adds ok/stale/missing/new counts from disk scan
+perag status --full -R  # recursive scan
+```
+
+### `perag prune`
+
+Removes database entries for files that no longer exist on disk.
+
+```bash
+perag prune
+```
+
+### `perag config`
+
+Shows which config files are active and the full set of effective settings.
+
+```bash
+perag config
+```
+
+---
+
+## Common workflows
+
+```bash
+# Ingest everything new and changed in the current directory
+perag chunk $(perag ls --new --stale) | perag embed | perag ingest
+
+# Ingest new files recursively
+perag chunk $(perag ls --new -R) | perag embed | perag ingest
+
+# Clean up after deleting files
+perag prune
+
+# Debug why a query returns unexpected results
+perag config
+perag status --full
+```
+
+---
+
+## Full pipeline with intermediate files
+
+```bash
 perag chunk document.pdf    > chunks.json
 perag embed < chunks.json   > chunks_embedded.json
 perag ingest < chunks_embedded.json
-
-# Multiple documents
-for f in docs/*.pdf; do
-    perag chunk "$f" | perag embed | perag ingest
-done
 ```
 
 ---
@@ -187,14 +238,11 @@ api_key  = "sk-..."
 
 ## Claude Code integration
 
-Copy `skills/SKILL.md` into your Claude Code skills directory to let Claude
-automatically query and ingest documents on your behalf:
+Run `perag init` to install the Claude Code skill automatically. It will be
+copied to `~/.claude/skills/perag.md`, enabling Claude to query and ingest
+documents on your behalf.
 
-```bash
-cp skills/SKILL.md ~/.claude/skills/perag.md
-```
-
-Claude will then ingest documents when you say things like "remember this file" or
+Claude will ingest documents when you say things like "remember this file" or
 "add this to the knowledge base", and will query the collection before answering
 questions about your documents.
 
