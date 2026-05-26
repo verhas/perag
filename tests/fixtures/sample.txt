@@ -1,0 +1,15 @@
+Introduction
+
+This is the first paragraph of the sample document. It contains enough text to form a meaningful chunk when processed by the plain-text chunker. The chunker splits on blank lines and merges short paragraphs.
+
+Background
+
+The second section provides background information. It discusses the history and context of the topic at hand. This paragraph is intentionally longer to ensure the chunker has something to work with when it evaluates whether to merge or split.
+
+Details
+
+Here we go into more detail. The detailed section expands on the background and provides specific information that a reader would find useful. This section also tests whether the chunker correctly handles three consecutive content sections without issues.
+
+Conclusion
+
+The final paragraph wraps up the document. It summarizes the key points and provides a closing statement. End of sample document.

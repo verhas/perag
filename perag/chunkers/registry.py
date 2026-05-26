@@ -1,10 +1,10 @@
 from pathlib import Path
 
-from chunkers.base import Chunker
-from chunkers.docx import DocxChunker
-from chunkers.markdown import MarkdownChunker
-from chunkers.pdf import PdfChunker
-from chunkers.text import TextChunker
+from perag.chunkers.base import Chunker
+from perag.chunkers.docx import DocxChunker
+from perag.chunkers.markdown import MarkdownChunker
+from perag.chunkers.pdf import PdfChunker
+from perag.chunkers.text import TextChunker
 
 _REGISTRY: dict[str, type[Chunker]] = {
     ".pdf": PdfChunker,

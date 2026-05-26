@@ -1,6 +1,6 @@
 import httpx
 
-from embedders.base import Embedder
+from perag.embedders.base import Embedder
 
 _API_URL = "https://api.openai.com/v1/embeddings"
 

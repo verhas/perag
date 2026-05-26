@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "perag"
-version = "0.1.0"
+version = "0.1.1"
 description = "Personal RAG toolkit for local document retrieval"
 requires-python = ">=3.11"
 dependencies = [
@@ -38,3 +38,6 @@ select = ["E", "F", "I", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.uv]
+python-preference = "system"

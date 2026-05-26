@@ -2,7 +2,7 @@ from pathlib import Path
 
 from markdown_it import MarkdownIt
 
-from chunkers.base import Chunker
+from perag.chunkers.base import Chunker, md5
 from perag.schema import Chunk
 
 
@@ -11,6 +11,7 @@ class MarkdownChunker(Chunker):
 
     def chunk(self, path: Path) -> list[Chunk]:
         source = str(path)
+        file_hash = md5(path)
         text = path.read_text(encoding="utf-8")
         md = MarkdownIt()
         tokens = md.parse(text)
@@ -52,6 +53,7 @@ class MarkdownChunker(Chunker):
                     source=source,
                     content=content,
                     metadata={"format": "markdown", "section": heading},
+                    file_hash=file_hash,
                 )
             )
         return chunks

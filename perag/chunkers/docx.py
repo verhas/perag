@@ -2,7 +2,7 @@ from pathlib import Path
 
 from docx import Document
 
-from chunkers.base import Chunker
+from perag.chunkers.base import Chunker, md5
 from perag.schema import Chunk
 
 _CHUNK_PARAS = 10
@@ -13,6 +13,7 @@ class DocxChunker(Chunker):
 
     def chunk(self, path: Path) -> list[Chunk]:
         source = str(path)
+        file_hash = md5(path)
         doc = Document(path)
 
         paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
@@ -26,6 +27,7 @@ class DocxChunker(Chunker):
                     source=source,
                     content=content,
                     metadata={"format": "docx", "paragraph_start": i},
+                    file_hash=file_hash,
                 )
             )
         return chunks

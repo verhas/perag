@@ -1,4 +1,4 @@
-from embedders.base import Embedder
+from perag.embedders.base import Embedder
 
 
 class LocalEmbedder(Embedder):
@@ -10,6 +10,11 @@ class LocalEmbedder(Embedder):
 
     def _load(self):
         if self._model is None:
+            import os
+            os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+            os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+            os.environ.setdefault("HF_HUB_VERBOSITY", "error")
+            os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
             from sentence_transformers import SentenceTransformer
             self._model = SentenceTransformer(self._model_name)
 
@@ -20,6 +25,9 @@ class LocalEmbedder(Embedder):
     @property
     def provider_name(self) -> str:
         return "local"
+
+    def preload(self) -> None:
+        self._load()
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         self._load()

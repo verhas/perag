@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import warnings
 from pathlib import Path
 
 import sqlite_vec
@@ -9,6 +10,20 @@ from perag.schema import Chunk
 
 def _connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
+    if not hasattr(conn, "enable_load_extension"):
+        import platform
+        if platform.system() == "Darwin":
+            hint = (
+                "Your Python was built without SQLite extension support (common with pyenv on macOS).\n"
+                "Reinstall perag using Homebrew Python:\n\n"
+                "  uv tool install perag --reinstall --python /opt/homebrew/bin/python3"
+            )
+        else:
+            hint = (
+                "Your Python was built without SQLite extension support.\n"
+                "Try reinstalling with a different Python interpreter."
+            )
+        raise RuntimeError(f"perag requires SQLite extension loading.\n{hint}")
     conn.enable_load_extension(True)
     sqlite_vec.load(conn)
     conn.enable_load_extension(False)
@@ -28,6 +43,11 @@ def init_db(db_path: Path) -> sqlite3.Connection:
             source   TEXT NOT NULL,
             content  TEXT NOT NULL,
             metadata TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS files (
+            source    TEXT PRIMARY KEY,
+            file_hash TEXT NOT NULL,
+            ingested_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
     """)
     conn.commit()
@@ -81,6 +101,22 @@ def ingest(conn: sqlite3.Connection, chunks: list[Chunk]) -> None:
             )
         _ensure_vec_table(conn, int(meta["dims"]))
 
+    # Resolve one hash per source, warning if chunks disagree.
+    source_hashes: dict[str, str] = {}
+    for chunk in chunks:
+        h = chunk.file_hash
+        if h is None:
+            continue
+        if chunk.source not in source_hashes:
+            source_hashes[chunk.source] = h
+        elif source_hashes[chunk.source] != h:
+            warnings.warn(
+                f"Conflicting file_hash values for '{chunk.source}' — "
+                f"using '{source_hashes[chunk.source]}', ignoring '{h}'. "
+                "The chunk pipeline may be corrupted.",
+                stacklevel=2,
+            )
+
     # Delete all existing chunks for each source in this batch (full replacement per source)
     sources = {c.source for c in chunks}
     for source in sources:
@@ -104,6 +140,14 @@ def ingest(conn: sqlite3.Connection, chunks: list[Chunk]) -> None:
         conn.execute(
             "INSERT INTO chunk_vectors (rowid, embedding) VALUES (?, ?)",
             (rowid, sqlite_vec.serialize_float32(chunk.vector)),
+        )
+
+    # Update files table with resolved hashes.
+    for source, file_hash in source_hashes.items():
+        conn.execute(
+            "INSERT OR REPLACE INTO files (source, file_hash, ingested_at) "
+            "VALUES (?, ?, datetime('now'))",
+            (source, file_hash),
         )
 
     conn.commit()

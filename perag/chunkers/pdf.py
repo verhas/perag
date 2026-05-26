@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pdfplumber
 
-from chunkers.base import Chunker
+from perag.chunkers.base import Chunker, md5
 from perag.schema import Chunk
 
 _MIN_CHARS = 50
@@ -13,6 +13,7 @@ class PdfChunker(Chunker):
 
     def chunk(self, path: Path) -> list[Chunk]:
         source = str(path)
+        file_hash = md5(path)
         chunks: list[Chunk] = []
         pending_text = ""
         pending_start = 1
@@ -31,6 +32,7 @@ class PdfChunker(Chunker):
                             source=source,
                             content=pending_text,
                             metadata={"format": "pdf", "page": pending_start},
+                            file_hash=file_hash,
                         )
                     )
                     pending_text = ""
@@ -44,6 +46,7 @@ class PdfChunker(Chunker):
                     source=source,
                     content=pending_text,
                     metadata={"format": "pdf", "page": pending_start},
+                    file_hash=file_hash,
                 )
             )
 

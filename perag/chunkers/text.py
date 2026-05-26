@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from chunkers.base import Chunker
+from perag.chunkers.base import Chunker, md5
 from perag.schema import Chunk
 
 _MAX_CHARS = 1500
@@ -13,6 +13,7 @@ class TextChunker(Chunker):
 
     def chunk(self, path: Path) -> list[Chunk]:
         source = str(path)
+        file_hash = md5(path)
         text = path.read_text(encoding="utf-8")
         paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
 
@@ -28,6 +29,7 @@ class TextChunker(Chunker):
                         source=source,
                         content=current,
                         metadata={"format": "text"},
+                        file_hash=file_hash,
                     )
                 )
                 # overlap: carry last _OVERLAP_CHARS of previous chunk
@@ -43,6 +45,7 @@ class TextChunker(Chunker):
                     source=source,
                     content=current,
                     metadata={"format": "text"},
+                    file_hash=file_hash,
                 )
             )
         return chunks

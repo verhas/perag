@@ -34,22 +34,29 @@ def _main(
 
 @app.command()
 def chunk(
-    file: Annotated[Path, typer.Argument(help="Document to chunk")],
+    files: Annotated[list[Path], typer.Argument(help="Documents to chunk")],
 ) -> None:
-    """Chunk a document and write JSON to stdout."""
-    if not file.exists():
-        err.print(f"[red]Error:[/red] file not found: {file}")
-        raise typer.Exit(1)
+    """Chunk one or more documents and write JSON to stdout."""
+    from perag.chunkers.registry import get_chunker
 
-    from chunkers.registry import get_chunker
-    try:
-        chunker = get_chunker(file)
-        chunks = chunker.chunk(file)
-    except ValueError as e:
-        err.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(1)
+    all_chunks = []
+    failed = False
+    for file in files:
+        if not file.exists():
+            err.print(f"[red]Error:[/red] file not found: {file}")
+            failed = True
+            continue
+        try:
+            chunks = get_chunker(file).chunk(file)
+            all_chunks.extend(chunks)
+        except ValueError as e:
+            err.print(f"[red]Error:[/red] {e}")
+            failed = True
 
-    print(json.dumps([c.to_dict() for c in chunks], ensure_ascii=False))
+    if all_chunks:
+        print(json.dumps([c.to_dict() for c in all_chunks], ensure_ascii=False))
+    if failed:
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -67,7 +74,8 @@ def embed() -> None:
         return
 
     cfg = load_config()
-    from embedders.registry import get_embedder
+    from perag.embedders.registry import get_embedder
+    from perag.spinner import spinner
     embedder = get_embedder(cfg.embedding)
 
     to_embed_idx = []
@@ -85,9 +93,16 @@ def embed() -> None:
     if to_embed_texts:
         batch_size = cfg.embedding.batch_size
         all_vectors: list[list[float]] = []
-        for i in range(0, len(to_embed_texts), batch_size):
+
+        with spinner(f"Loading model {cfg.embedding.model}"):
+            embedder.preload()
+
+        n_batches = (len(to_embed_texts) + batch_size - 1) // batch_size
+        for batch_num, i in enumerate(range(0, len(to_embed_texts), batch_size), start=1):
             batch = to_embed_texts[i : i + batch_size]
-            all_vectors.extend(embedder.embed(batch))
+            label = f"Embedding {batch_num}/{n_batches}"
+            with spinner(label):
+                all_vectors.extend(embedder.embed(batch))
 
         for list_idx, chunk_idx in enumerate(to_embed_idx):
             chunks[chunk_idx].embedding_model = embedder.model_name
@@ -111,9 +126,13 @@ def ingest() -> None:
         err.print("[yellow]Warning:[/yellow] no chunks to ingest")
         return
 
-    from db.store import init_db, ingest as db_ingest
+    from perag.db.store import init_db, ingest as db_ingest
     db_path = find_db_path()
-    conn = init_db(db_path)
+    try:
+        conn = init_db(db_path)
+    except RuntimeError as e:
+        err.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
     try:
         db_ingest(conn, chunks)
     except ValueError as e:
@@ -185,14 +204,18 @@ def query(
         err.print(f"[red]Error:[/red] no database found at {db_path}. Run `perag ingest` first.")
         raise typer.Exit(1)
 
-    from embedders.registry import get_embedder
-    from db.store import init_db
-    from db.search import search
+    from perag.embedders.registry import get_embedder
+    from perag.db.store import init_db
+    from perag.db.search import search
 
     embedder = get_embedder(cfg.embedding)
     vector = embedder.embed([text])[0]
 
-    conn = init_db(db_path)
+    try:
+        conn = init_db(db_path)
+    except RuntimeError as e:
+        err.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
     try:
         results = search(conn, vector, top_k=cfg.query.top_k)
     finally:
