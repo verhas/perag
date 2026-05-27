@@ -1,14 +1,18 @@
 # perag
 
-You have a folder of documents — contracts, reports, research notes, meeting minutes —
-and you want to ask questions across all of them. Not just search for a keyword, but
-ask a real question and get an answer that draws on what is actually written in those
-files.
+`perag` is a personal RAG (Retrieval-Augmented Generation) system that works out of
+the box. It gives your AI assistant access to your own documents — no cloud service,
+no configuration, no infrastructure to manage.
 
-`perag` makes that possible. You point it at your documents, it reads and indexes them
-on your machine, and from then on you — or an AI assistant like Claude — can query
-them in plain language. Everything stays on your computer. Nothing is sent to a cloud
-service. No account required.
+AI assistants like Claude Code are powerful — but they can only work with what fits in
+their context window. You cannot simply hand them a folder of a hundred documents and
+ask a question. `perag` solves this by reading and indexing your documents locally,
+then selecting only the passages relevant to your question and feeding those to the
+assistant. The result is accurate, grounded answers drawn from your own files — without
+overwhelming the context window and without sending your documents to any cloud service.
+
+Note: `perag` works with AI assistants that can run programs on your computer, such as
+Claude Code.
 
 ## How it works with an AI assistant
 
