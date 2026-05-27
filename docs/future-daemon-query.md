@@ -97,11 +97,38 @@ The client treats any error response as a signal to fall back to in-process embe
 for the current invocation and, if it started the daemon itself, to attempt a fresh
 start for subsequent invocations.
 
+### ACK timeout
+
+The client waits for the ACK with a configurable timeout (default: 20 seconds). There
+is no timeout on the response that follows the ACK — once the daemon has acknowledged
+the request, the client waits as long as needed for the embedding to complete.
+
+If the ACK does not arrive within the timeout, the client:
+
+1. Kills the daemon process using the PID from `.perag/embed.pid`
+2. Deletes both `.perag/embed.pid` and `.perag/embed.sock`
+3. Logs an error and prints a message to stderr
+4. Falls back to in-process embedding for the current invocation
+5. Starts a fresh daemon in the background, exactly as it would if no daemon were running
+
+The timeout is configurable:
+
+```toml
+[embedding]
+daemon_ack_timeout = 20   # seconds; set to 0 to disable the timeout
+```
+
+A hung or overloaded daemon that fails to ACK is treated the same as a crashed one —
+the client does not wait indefinitely and does not attempt to send the request again.
+The immediate daemon restart ensures subsequent invocations benefit from the daemon
+without waiting for the next natural start opportunity.
+
 ### Config fingerprint
 
 The request includes a `config_fingerprint` — a hash of the fields that affect
-embedding behaviour: `provider`, `model`, `url` (for Ollama), `batch_size`. If the
-fingerprint in the request does not match what the daemon loaded with, the daemon
+embedding behaviour: `model` and `batch_size`. Since the daemon is only ever used with
+the local provider, `provider` is always `local` and there is no URL to consider. If
+the fingerprint in the request does not match what the daemon loaded with, the daemon
 returns an error and exits. It does not attempt to reload.
 
 ### Stale socket handling
