@@ -471,8 +471,13 @@ def _ls_pipe(results: list[tuple[str, str]]) -> None:
 def query(
     text: Annotated[str, typer.Argument(help="Query text")],
     json_output: Annotated[bool, typer.Option("--json", help="Output JSON instead of plain text")] = False,
+    files: Annotated[bool, typer.Option("--files", help="Output deduplicated source filenames instead of chunk content")] = False,
 ) -> None:
     """Embed a query and retrieve the top-k matching chunks."""
+    if json_output and files:
+        err.print("[red]Error:[/red] --json and --files are mutually exclusive")
+        raise typer.Exit(1)
+
     cfg = load_config()
     db_path = find_db_path()
 
@@ -483,9 +488,14 @@ def query(
     from perag.embedders.registry import get_embedder
     from perag.db.store import init_db
     from perag.db.search import search
+    from perag.spinner import spinner
 
     embedder = get_embedder(cfg.embedding)
+    with spinner(f"Loading model {cfg.embedding.model}"):
+        embedder.preload()
     vector = embedder.embed([text])[0]
+
+    top_k = cfg.query.top_k * 4 if files else cfg.query.top_k
 
     try:
         conn = init_db(db_path)
@@ -493,7 +503,7 @@ def query(
         err.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
     try:
-        results = search(conn, vector, top_k=cfg.query.top_k)
+        results = search(conn, vector, top_k=top_k)
     finally:
         conn.close()
 
@@ -501,7 +511,25 @@ def query(
         err.print("[yellow]No results found.[/yellow]")
         return
 
-    if json_output or cfg.query.output == "json":
+    if files:
+        counts: dict[str, int] = {}
+        for c in results:
+            counts[c.source] = counts.get(c.source, 0) + 1
+        ranked = sorted(counts.items(), key=lambda x: -x[1])
+        if sys.stdout.isatty():
+            from rich.console import Console as RichConsole
+            from rich.table import Table
+            out = RichConsole()
+            table = Table(show_header=True, header_style="bold", box=None, pad_edge=False, show_edge=False)
+            table.add_column("Chunks", width=7, justify="right", style="dim")
+            table.add_column("File")
+            for source, count in ranked:
+                table.add_row(str(count), source)
+            out.print(table)
+        else:
+            for source, _ in ranked:
+                print(source)
+    elif json_output or cfg.query.output == "json":
         print(json.dumps([c.to_dict() for c in results], ensure_ascii=False))
     else:
         parts = []

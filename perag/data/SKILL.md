@@ -92,7 +92,8 @@ If no results come back, answer from your own knowledge and note that nothing re
 was found in the knowledge base.
 
 ```bash
-perag query "question" --json   # structured output if needed
+perag query "question" --json    # structured output if needed
+perag query "question" --files   # filenames only, ordered by relevance
 ```
 
 ---

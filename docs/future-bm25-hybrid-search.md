@@ -13,6 +13,18 @@ about termination clauses in general rather than the chunk that actually contain
 text "Article 7.3". The failure is invisible — the query returns something, just not
 the right thing.
 
+A related symptom is that querying a rare or unique term (a proper name, a place, a
+word from another language) returns results from completely unrelated files. This is
+because vector search always returns exactly k results regardless of actual relevance —
+there is no distance cutoff. The search finds the nearest neighbours in embedding
+space even when none of them are genuinely close.
+
+A similarity threshold would address this, but the distance unit (L2 in embedding
+space) is model-dependent and not interpretable by a non-developer user. A threshold
+that works well for `all-MiniLM-L6-v2` would need retuning for every other model.
+BM25 is the correct fix: a keyword search for a rare term finds it exactly where it
+appears, or returns nothing — it does not return unrelated content as a consolation.
+
 ## Proposed solution
 
 Add BM25 full-text search alongside vector search and merge the results before

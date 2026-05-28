@@ -126,8 +126,13 @@ Retrieves the most relevant chunks from the database for a given question.
 
 ```bash
 perag query "what is the notice period for termination?"
-perag query "budget for Q3" --json   # structured JSON output
+perag query "budget for Q3" --json    # structured JSON output
+perag query "budget for Q3" --files   # filenames only, ordered by relevance
 ```
+
+`--files` returns deduplicated source filenames instead of chunk content, ordered by
+how many matching chunks each file contributed. When piped, one filename per line —
+suitable for use with `$()` or wiki-style navigation.
 
 ### `perag ls [paths...] [flags]`
 
