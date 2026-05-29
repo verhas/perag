@@ -53,8 +53,7 @@ def chunk(
             err.print(f"[red]Error:[/red] {e}")
             failed = True
 
-    if all_chunks:
-        print(json.dumps([c.to_dict() for c in all_chunks], ensure_ascii=False))
+    print(json.dumps([c.to_dict() for c in all_chunks], ensure_ascii=False))
     if failed:
         raise typer.Exit(1)
 
