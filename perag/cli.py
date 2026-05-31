@@ -166,8 +166,9 @@ def init_cmd() -> None:
                 "# model = \"all-MiniLM-L6-v2\"\n"
             )
         else:
-            example = Path(__file__).parent.parent / "config.example.toml"
-            shutil.copy(example, config_path)
+            example_src = importlib.resources.files("perag.data").joinpath("config.example.toml")
+            with importlib.resources.as_file(example_src) as example:
+                shutil.copy(example, config_path)
         err.print(f"[green]Created[/green] {config_path}")
 
     gitignore = Path.cwd() / ".gitignore"
