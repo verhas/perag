@@ -1,5 +1,7 @@
 # Future: Persistent Embedding Daemon
 
+**Status:** implemented 2026-05-31 in release 0.1.4
+
 ## Problem
 
 Every `perag embed` and `perag query` invocation starts a fresh Python process. For

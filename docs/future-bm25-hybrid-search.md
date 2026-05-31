@@ -1,5 +1,7 @@
 # Future: Hybrid Search (BM25 + Vector)
 
+**Status:** planned
+
 ## Problem
 
 `perag query` uses pure vector (ANN) search — it embeds the query and finds chunks

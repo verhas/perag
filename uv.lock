@@ -970,7 +970,7 @@ wheels = [
 
 [[package]]
 name = "perag"
-version = "0.1.2"
+version = "0.1.4"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -1002,7 +1002,6 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "sentence-transformers", specifier = ">=3" },
     { name = "sqlite-vec", specifier = ">=0.1.6" },
-    { name = "tomllib", marker = "python_full_version < '3.11'" },
     { name = "typer", specifier = ">=0.12" },
 ]
 provides-extras = ["dev"]

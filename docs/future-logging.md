@@ -1,5 +1,7 @@
 # Future: Logging
 
+**Status:** planned
+
 ## Motivation
 
 Logging across all perag operations would aid debugging, provide an audit trail of

@@ -1,4 +1,5 @@
 # Future: Directory Security
+**Status:** planned
 
 ## On initialisation
 

@@ -10,6 +10,9 @@ class EmbeddingConfig:
     url: str = "http://localhost:11434"
     api_key: str = ""
     batch_size: int = 32
+    daemon: bool = True
+    daemon_ack_timeout: int = 20
+    daemon_idle_timeout: int = 300
 
 
 @dataclass
@@ -22,6 +25,16 @@ class QueryConfig:
 class Config:
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     query: QueryConfig = field(default_factory=QueryConfig)
+
+
+def find_perag_dir() -> Path:
+    """Find the .perag directory using local-first lookup."""
+    local = Path.cwd() / ".perag"
+    if local.exists():
+        return local
+    global_dir = Path.home() / ".perag"
+    global_dir.mkdir(parents=True, exist_ok=True)
+    return global_dir
 
 
 def _load_toml(path: Path) -> dict:

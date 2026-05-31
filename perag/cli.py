@@ -59,8 +59,23 @@ def chunk(
 
 
 @app.command()
-def embed() -> None:
+def embed(
+    daemon_mode: Annotated[bool, typer.Option("--daemon", help="Start the embedding daemon in the foreground and exit")] = False,
+) -> None:
     """Read chunks from stdin, add embeddings, write JSON to stdout."""
+    cfg = load_config()
+
+    if daemon_mode:
+        if cfg.embedding.provider != "local":
+            err.print("[red]Error:[/red] --daemon is only supported for the local embedding provider")
+            raise typer.Exit(1)
+        from perag.config import find_perag_dir
+        from perag.embed_daemon import serve
+        perag_dir = find_perag_dir()
+        err.print(f"[green]Starting[/green] embedding daemon in {perag_dir}")
+        serve(perag_dir, cfg.embedding.model, cfg.embedding.batch_size, cfg.embedding.daemon_idle_timeout)
+        return
+
     try:
         raw = json.load(sys.stdin)
     except json.JSONDecodeError as e:
@@ -72,7 +87,6 @@ def embed() -> None:
         print("[]")
         return
 
-    cfg = load_config()
     from perag.embedders.registry import get_embedder
     from perag.spinner import spinner
     embedder = get_embedder(cfg.embedding)
@@ -87,21 +101,33 @@ def embed() -> None:
         elif c.embedding_model != embedder.model_name:
             to_embed_idx.append(i)
             to_embed_texts.append(c.content)
-        # else: already embedded with current model — pass through
 
     if to_embed_texts:
         batch_size = cfg.embedding.batch_size
         all_vectors: list[list[float]] = []
 
-        with spinner(f"Loading model {cfg.embedding.model}"):
-            embedder.preload()
+        use_daemon = cfg.embedding.provider == "local" and cfg.embedding.daemon
+        if use_daemon:
+            from perag.config import find_perag_dir
+            from perag.daemon_client import try_embed
+            perag_dir = find_perag_dir()
+            with spinner("Embedding via daemon"):
+                all_vectors = try_embed(
+                    perag_dir, cfg.embedding.model, batch_size,
+                    cfg.embedding.daemon_ack_timeout, cfg.embedding.daemon_idle_timeout,
+                    to_embed_texts, err.print,
+                ) or []
 
-        n_batches = (len(to_embed_texts) + batch_size - 1) // batch_size
-        for batch_num, i in enumerate(range(0, len(to_embed_texts), batch_size), start=1):
-            batch = to_embed_texts[i : i + batch_size]
-            label = f"Embedding {batch_num}/{n_batches}"
-            with spinner(label):
-                all_vectors.extend(embedder.embed(batch))
+        if len(all_vectors) != len(to_embed_texts):
+            # Daemon unavailable or returned wrong count — fall back to in-process
+            all_vectors = []
+            with spinner(f"Loading model {cfg.embedding.model}"):
+                embedder.preload()
+            n_batches = (len(to_embed_texts) + batch_size - 1) // batch_size
+            for batch_num, i in enumerate(range(0, len(to_embed_texts), batch_size), start=1):
+                batch = to_embed_texts[i : i + batch_size]
+                with spinner(f"Embedding {batch_num}/{n_batches}"):
+                    all_vectors.extend(embedder.embed(batch))
 
         for list_idx, chunk_idx in enumerate(to_embed_idx):
             chunks[chunk_idx].embedding_model = embedder.model_name
@@ -471,7 +497,7 @@ def _ls_pipe(results: list[tuple[str, str]]) -> None:
 def query(
     text: Annotated[str, typer.Argument(help="Query text")],
     json_output: Annotated[bool, typer.Option("--json", help="Output JSON instead of plain text")] = False,
-    files: Annotated[bool, typer.Option("--files", help="Output deduplicated source filenames instead of chunk content")] = False,
+    files: Annotated[bool, typer.Option("--files", "--file", is_eager=False, help="Output deduplicated source filenames instead of chunk content")] = False,
 ) -> None:
     """Embed a query and retrieve the top-k matching chunks."""
     if json_output and files:
@@ -491,9 +517,26 @@ def query(
     from perag.spinner import spinner
 
     embedder = get_embedder(cfg.embedding)
-    with spinner(f"Loading model {cfg.embedding.model}"):
-        embedder.preload()
-    vector = embedder.embed([text])[0]
+
+    vector: list[float] | None = None
+    use_daemon = cfg.embedding.provider == "local" and cfg.embedding.daemon
+    if use_daemon:
+        from perag.config import find_perag_dir
+        from perag.daemon_client import try_embed
+        perag_dir = find_perag_dir()
+        with spinner("Embedding via daemon"):
+            result = try_embed(
+                perag_dir, cfg.embedding.model, cfg.embedding.batch_size,
+                cfg.embedding.daemon_ack_timeout, cfg.embedding.daemon_idle_timeout,
+                [text], err.print,
+            )
+        if result:
+            vector = result[0]
+
+    if vector is None:
+        with spinner(f"Loading model {cfg.embedding.model}"):
+            embedder.preload()
+        vector = embedder.embed([text])[0]
 
     top_k = cfg.query.top_k * 4 if files else cfg.query.top_k
 
