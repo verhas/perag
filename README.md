@@ -84,6 +84,21 @@ learn the individual commands.
 
 ## Commands
 
+### `perag add <file> [<file> ...]`
+
+Chunks, embeds, and ingests one or more documents in a single step. This is the
+everyday shortcut — equivalent to running `perag chunk | perag embed | perag ingest`
+but without the pipe.
+
+```bash
+perag add report.pdf
+perag add notes.md summary.txt contract.docx
+perag add *.md
+```
+
+Use the full pipeline (`perag chunk | perag embed | perag ingest`) when you need to
+inspect intermediate output, use a custom chunker, or save embedded chunks to a file.
+
 ### `perag init`
 
 Creates a `.perag/` directory, writes a starter `config.toml`, adds `.perag/perag.db`

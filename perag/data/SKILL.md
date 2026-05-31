@@ -32,10 +32,10 @@ clear they want it to be part of the searchable collection.
 ls .perag/ 2>/dev/null || perag init
 ```
 
-**Step 2 — run the full pipeline:**
+**Step 2 — add the document:**
 
 ```bash
-perag chunk path/to/document.pdf | perag embed | perag ingest
+perag add path/to/document.pdf
 ```
 
 Supported formats: `.pdf`, `.docx`, `.doc`, `.md`, `.markdown`, `.txt`, `.text`
@@ -47,25 +47,25 @@ You can now ask me questions about it."
 ### Ingesting multiple files
 
 ```bash
-perag chunk report.pdf notes.md summary.txt | perag embed | perag ingest
+perag add report.pdf notes.md summary.txt
 ```
 
 ### Ingesting new or changed files only
 
 ```bash
 # New files not yet in the database
-perag chunk $(perag ls --new) | perag embed | perag ingest
+perag add $(perag ls --new)
 
 # Files changed since last ingest
-perag chunk $(perag ls --stale) | perag embed | perag ingest
+perag add $(perag ls --stale)
 
 # Both at once
-perag chunk $(perag ls --new --stale) | perag embed | perag ingest
+perag add $(perag ls --new --stale)
 ```
 
 ### Re-ingesting an updated file
 
-Just run the pipeline again — ingest automatically replaces all existing chunks for
+Just run `perag add` again — ingest automatically replaces all existing chunks for
 that source file.
 
 ---

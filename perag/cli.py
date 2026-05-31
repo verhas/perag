@@ -12,7 +12,10 @@ from perag.schema import Chunk
 
 _VERSION = _pkg_version("perag")
 
-app = typer.Typer(help=f"perag — personal RAG toolkit  (version {_VERSION})")
+app = typer.Typer(
+    help=f"perag — personal RAG toolkit  (version {_VERSION})",
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 err = Console(stderr=True)
 
 
@@ -87,53 +90,7 @@ def embed(
         print("[]")
         return
 
-    from perag.embedders.registry import get_embedder
-    from perag.spinner import spinner
-    embedder = get_embedder(cfg.embedding)
-
-    to_embed_idx = []
-    to_embed_texts = []
-
-    for i, c in enumerate(chunks):
-        if c.embedding_model is None:
-            to_embed_idx.append(i)
-            to_embed_texts.append(c.content)
-        elif c.embedding_model != embedder.model_name:
-            to_embed_idx.append(i)
-            to_embed_texts.append(c.content)
-
-    if to_embed_texts:
-        batch_size = cfg.embedding.batch_size
-        all_vectors: list[list[float]] = []
-
-        use_daemon = cfg.embedding.provider == "local" and cfg.embedding.daemon
-        if use_daemon:
-            from perag.config import find_perag_dir
-            from perag.daemon_client import try_embed
-            perag_dir = find_perag_dir()
-            with spinner("Embedding via daemon"):
-                all_vectors = try_embed(
-                    perag_dir, cfg.embedding.model, batch_size,
-                    cfg.embedding.daemon_ack_timeout, cfg.embedding.daemon_idle_timeout,
-                    to_embed_texts, err.print,
-                ) or []
-
-        if len(all_vectors) != len(to_embed_texts):
-            # Daemon unavailable or returned wrong count — fall back to in-process
-            all_vectors = []
-            with spinner(f"Loading model {cfg.embedding.model}"):
-                embedder.preload()
-            n_batches = (len(to_embed_texts) + batch_size - 1) // batch_size
-            for batch_num, i in enumerate(range(0, len(to_embed_texts), batch_size), start=1):
-                batch = to_embed_texts[i : i + batch_size]
-                with spinner(f"Embedding {batch_num}/{n_batches}"):
-                    all_vectors.extend(embedder.embed(batch))
-
-        for list_idx, chunk_idx in enumerate(to_embed_idx):
-            chunks[chunk_idx].embedding_model = embedder.model_name
-            chunks[chunk_idx].embedding_provider = embedder.provider_name
-            chunks[chunk_idx].vector = all_vectors[list_idx]
-
+    _embed_chunks(chunks, cfg)
     print(json.dumps([c.to_dict() for c in chunks], ensure_ascii=False))
 
 
@@ -167,6 +124,103 @@ def ingest() -> None:
         conn.close()
 
     err.print(f"[green]Ingested[/green] {len(chunks)} chunks into {db_path}")
+
+
+def _embed_chunks(chunks: list[Chunk], cfg) -> list[Chunk]:
+    """Embed chunks in-place, using the daemon when available. Returns the same list."""
+    from perag.embedders.registry import get_embedder
+    from perag.spinner import spinner
+
+    embedder = get_embedder(cfg.embedding)
+    to_embed_idx = [
+        i for i, c in enumerate(chunks)
+        if c.embedding_model is None or c.embedding_model != embedder.model_name
+    ]
+    if not to_embed_idx:
+        return chunks
+
+    texts = [chunks[i].content for i in to_embed_idx]
+    batch_size = cfg.embedding.batch_size
+    all_vectors: list[list[float]] = []
+
+    use_daemon = cfg.embedding.provider == "local" and cfg.embedding.daemon
+    if use_daemon:
+        from perag.config import find_perag_dir
+        from perag.daemon_client import try_embed
+        perag_dir = find_perag_dir()
+        with spinner("Embedding via daemon"):
+            all_vectors = try_embed(
+                perag_dir, cfg.embedding.model, batch_size,
+                cfg.embedding.daemon_ack_timeout, cfg.embedding.daemon_idle_timeout,
+                texts, err.print,
+            ) or []
+
+    if len(all_vectors) != len(texts):
+        all_vectors = []
+        with spinner(f"Loading model {cfg.embedding.model}"):
+            embedder.preload()
+        n_batches = (len(texts) + batch_size - 1) // batch_size
+        for batch_num, i in enumerate(range(0, len(texts), batch_size), start=1):
+            with spinner(f"Embedding {batch_num}/{n_batches}"):
+                all_vectors.extend(embedder.embed(texts[i : i + batch_size]))
+
+    for list_idx, chunk_idx in enumerate(to_embed_idx):
+        chunks[chunk_idx].embedding_model = embedder.model_name
+        chunks[chunk_idx].embedding_provider = embedder.provider_name
+        chunks[chunk_idx].vector = all_vectors[list_idx]
+
+    return chunks
+
+
+@app.command(name="add")
+def add_cmd(
+    files: Annotated[list[Path], typer.Argument(help="Documents to chunk, embed, and ingest")],
+) -> None:
+    """Chunk, embed, and ingest one or more documents in a single step."""
+    from perag.chunkers.registry import get_chunker
+    from perag.db.store import init_db, ingest as db_ingest
+
+    cfg = load_config()
+
+    all_chunks: list[Chunk] = []
+    failed = False
+    for file in files:
+        if not file.exists():
+            err.print(f"[red]Error:[/red] file not found: {file}")
+            failed = True
+            continue
+        try:
+            all_chunks.extend(get_chunker(file).chunk(file))
+        except ValueError as e:
+            err.print(f"[red]Error:[/red] {e}")
+            failed = True
+
+    if not all_chunks:
+        if failed:
+            raise typer.Exit(1)
+        err.print("[yellow]Warning:[/yellow] no chunks produced")
+        return
+
+    _embed_chunks(all_chunks, cfg)
+
+    db_path = find_db_path()
+    try:
+        conn = init_db(db_path)
+    except RuntimeError as e:
+        err.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    try:
+        db_ingest(conn, all_chunks)
+    except ValueError as e:
+        err.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    finally:
+        conn.close()
+
+    err.print(f"[green]Added[/green] {len(files) - (1 if failed else 0)} file(s), "
+              f"{len(all_chunks)} chunks → {db_path}")
+    if failed:
+        raise typer.Exit(1)
 
 
 @app.command(name="init")
