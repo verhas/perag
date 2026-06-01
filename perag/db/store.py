@@ -98,6 +98,20 @@ def get_stats(conn: sqlite3.Connection) -> dict:
     }
 
 
+def remove_source(conn: sqlite3.Connection, source: str) -> int:
+    """Delete all chunks and the file record for source. Returns the number of chunks deleted."""
+    rows = conn.execute("SELECT id FROM chunks WHERE source = ?", (source,)).fetchall()
+    for row in rows:
+        conn.execute(
+            "DELETE FROM chunk_vectors WHERE rowid = (SELECT rowid FROM chunks WHERE id = ?)",
+            (row["id"],),
+        )
+    conn.execute("DELETE FROM chunks WHERE source = ?", (source,))
+    conn.execute("DELETE FROM files WHERE source = ?", (source,))
+    conn.commit()
+    return len(rows)
+
+
 def get_file_records(conn: sqlite3.Connection) -> dict[str, str]:
     """Return {source: file_hash} for all files recorded in the database."""
     rows = conn.execute("SELECT source, file_hash FROM files").fetchall()

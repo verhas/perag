@@ -21,10 +21,17 @@ _REGISTRY: dict[str, type[Chunker]] = {
 }
 
 
-def get_chunker(path: Path) -> Chunker:
+def get_chunker(path: Path, as_format: str | None = None) -> Chunker:
+    if as_format is not None:
+        key = as_format if as_format.startswith(".") else f".{as_format}"
+        cls = _REGISTRY.get(key.lower())
+        if cls is None:
+            supported = ", ".join(sorted(_REGISTRY))
+            raise ValueError(f"Unknown format '{as_format}'. Supported: {supported}")
+        return cls()
     ext = path.suffix.lower()
     cls = _REGISTRY.get(ext)
     if cls is None:
         supported = ", ".join(sorted(_REGISTRY))
-        raise ValueError(f"Unsupported file type '{ext}'. Supported: {supported}")
+        raise ValueError(f"Unsupported file type '{ext}'. Supported: {supported}. Use --as to force a format.")
     return cls()

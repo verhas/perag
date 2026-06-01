@@ -1,11 +1,22 @@
 import json
 import sys
+from enum import Enum
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Annotated
 
 import typer
 from rich.console import Console
+
+
+class ChunkFormat(str, Enum):
+    txt = "txt"
+    text = "text"
+    md = "md"
+    markdown = "markdown"
+    pdf = "pdf"
+    docx = "docx"
+    doc = "doc"
 
 from perag.config import find_db_path, load_config
 from perag.schema import Chunk
@@ -38,6 +49,7 @@ def _main(
 @app.command()
 def chunk(
     files: Annotated[list[Path], typer.Argument(help="Documents to chunk")],
+    as_format: Annotated[ChunkFormat | None, typer.Option("--as", help="Treat all files as this format")] = None,
 ) -> None:
     """Chunk one or more documents and write JSON to stdout."""
     from perag.chunkers.registry import get_chunker
@@ -50,7 +62,7 @@ def chunk(
             failed = True
             continue
         try:
-            chunks = get_chunker(file).chunk(file)
+            chunks = get_chunker(file, as_format=as_format.value if as_format else None).chunk(file)
             all_chunks.extend(chunks)
         except ValueError as e:
             err.print(f"[red]Error:[/red] {e}")
@@ -175,6 +187,7 @@ def _embed_chunks(chunks: list[Chunk], cfg) -> list[Chunk]:
 @app.command(name="add")
 def add_cmd(
     files: Annotated[list[Path], typer.Argument(help="Documents to chunk, embed, and ingest")],
+    as_format: Annotated[ChunkFormat | None, typer.Option("--as", help="Treat all files as this format")] = None,
 ) -> None:
     """Chunk, embed, and ingest one or more documents in a single step."""
     from perag.chunkers.registry import get_chunker
@@ -190,7 +203,7 @@ def add_cmd(
             failed = True
             continue
         try:
-            all_chunks.extend(get_chunker(file).chunk(file))
+            all_chunks.extend(get_chunker(file, as_format=as_format.value if as_format else None).chunk(file))
         except ValueError as e:
             err.print(f"[red]Error:[/red] {e}")
             failed = True
@@ -280,8 +293,9 @@ def config() -> None:
     cfg = load_config()
     db_path = find_db_path()
 
+    from perag.config import find_perag_dir
     global_cfg_path = Path.home() / ".perag" / "config.toml"
-    local_cfg_path = Path.cwd() / ".perag" / "config.toml"
+    local_cfg_path = find_perag_dir() / "config.toml"
 
     out = RichConsole()
 
@@ -430,6 +444,146 @@ def prune() -> None:
     err.print(f"\n[green]Done.[/green] Removed {len(pruned)} file(s) from the database.")
 
 
+@app.command(name="rm")
+def rm_cmd(
+    paths: Annotated[list[str], typer.Argument(help="Files to remove from the database")],
+) -> None:
+    """Remove one or more files from the database."""
+    from perag.db.store import init_db, get_file_records, remove_source
+
+    db_path = find_db_path()
+    if not db_path.exists():
+        err.print("[yellow]No database found.[/yellow]")
+        raise typer.Exit(1)
+
+    try:
+        conn = init_db(db_path)
+    except RuntimeError as e:
+        err.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    try:
+        file_records = get_file_records(conn)
+        sources = list(file_records.keys())
+        failed = False
+
+        for path_arg in paths:
+            p = Path(path_arg)
+
+            if p.exists():
+                # File is on disk — resolve to absolute path for an exact match.
+                source = str(p.resolve())
+                if source not in file_records:
+                    err.print(f"[red]Error:[/red] '{path_arg}' is not in the database")
+                    failed = True
+                    continue
+            else:
+                # File gone from disk — match by path suffix against stored sources.
+                p_parts = p.parts
+                matches = [s for s in sources if Path(s).parts[-len(p_parts):] == p_parts]
+                if not matches:
+                    err.print(f"[red]Error:[/red] no database entry matching '{path_arg}'")
+                    failed = True
+                    continue
+                if len(matches) > 1:
+                    err.print(f"[red]Error:[/red] '{path_arg}' is ambiguous — be more specific:")
+                    for m in matches:
+                        err.print(f"  {m}")
+                    failed = True
+                    continue
+                source = matches[0]
+                if Path(source).exists():
+                    err.print(
+                        f"[yellow]Warning:[/yellow] '{source}' still exists on disk — "
+                        "it will appear as NEW on the next scan."
+                    )
+
+            n = remove_source(conn, source)
+            err.print(f"[green]Removed[/green] {source} ({n} chunk(s))")
+    finally:
+        conn.close()
+
+    if failed:
+        raise typer.Exit(1)
+
+
+@app.command()
+def update(
+    recurse: Annotated[bool, typer.Option("--recurse", "-R", help="Recurse into subdirectories when scanning for stale files")] = False,
+) -> None:
+    """Prune deleted files and re-ingest stale documents."""
+    from perag.chunkers.base import md5
+    from perag.chunkers.registry import SUPPORTED_EXTENSIONS, get_chunker
+    from perag.db.store import init_db, prune as db_prune, get_file_records, ingest as db_ingest
+
+    db_path = find_db_path()
+    if not db_path.exists():
+        err.print("[yellow]No database found — nothing to update.[/yellow]")
+        return
+
+    cfg = load_config()
+
+    try:
+        conn = init_db(db_path)
+    except RuntimeError as e:
+        err.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    try:
+        pruned = db_prune(conn)
+        file_records = get_file_records(conn)
+    finally:
+        conn.close()
+
+    for source in pruned:
+        err.print(f"[red]Pruned[/red] {source}")
+    if pruned:
+        err.print(f"Removed {len(pruned)} missing file(s) from the database.")
+
+    glob = "**/*" if recurse else "*"
+    stale: list[Path] = [
+        f for f in sorted(Path.cwd().glob(glob))
+        if f.is_file()
+        and f.suffix.lower() in SUPPORTED_EXTENSIONS
+        and str(f.resolve()) in file_records
+        and md5(f) != file_records[str(f.resolve())]
+    ]
+
+    if not stale:
+        err.print("[dim]No stale files — collection is up to date.[/dim]")
+        return
+
+    all_chunks: list[Chunk] = []
+    failed = False
+    for file in stale:
+        err.print(f"[yellow]Re-ingesting[/yellow] {file}")
+        try:
+            all_chunks.extend(get_chunker(file).chunk(file))
+        except ValueError as e:
+            err.print(f"[red]Error:[/red] {e}")
+            failed = True
+
+    if not all_chunks:
+        if failed:
+            raise typer.Exit(1)
+        return
+
+    _embed_chunks(all_chunks, cfg)
+
+    try:
+        conn = init_db(db_path)
+        db_ingest(conn, all_chunks)
+    except (RuntimeError, ValueError) as e:
+        err.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    finally:
+        conn.close()
+
+    err.print(f"[green]Updated[/green] {len(stale)} file(s), {len(all_chunks)} chunks → {db_path}")
+    if failed:
+        raise typer.Exit(1)
+
+
 @app.command(name="ls")
 def ls_cmd(
     paths: Annotated[list[Path] | None, typer.Argument(help="Files or directories to scan (default: current directory)")] = None,
@@ -501,7 +655,7 @@ def ls_cmd(
                 results.append(("MISSING", source))
 
     if sys.stdout.isatty():
-        _ls_tty(results)
+        _ls_tty(results, db_entries=len(file_records))
     else:
         _ls_pipe(results)
 
@@ -514,13 +668,16 @@ _STATUS_STYLE = {
 }
 
 
-def _ls_tty(results: list[tuple[str, str]]) -> None:
+def _ls_tty(results: list[tuple[str, str]], db_entries: int = 0) -> None:
     from rich.console import Console as RichConsole
     from rich.table import Table
 
     out = RichConsole()
     if not results:
-        out.print("[dim]No matching files.[/dim]")
+        msg = "[dim]No matching files.[/dim]"
+        if db_entries:
+            msg += f" [dim](database has {db_entries} file(s) — try a different path or -R)[/dim]"
+        out.print(msg)
         return
 
     table = Table(show_header=True, header_style="bold", box=None, pad_edge=False, show_edge=False)

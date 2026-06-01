@@ -28,10 +28,11 @@ class Config:
 
 
 def find_perag_dir() -> Path:
-    """Find the .perag directory using local-first lookup."""
-    local = Path.cwd() / ".perag"
-    if local.exists():
-        return local
+    """Walk up from cwd to find the nearest .perag directory, then fall back to ~/.perag."""
+    for directory in [Path.cwd(), *Path.cwd().parents]:
+        candidate = directory / ".perag"
+        if candidate.exists():
+            return candidate
     global_dir = Path.home() / ".perag"
     global_dir.mkdir(parents=True, exist_ok=True)
     return global_dir
@@ -52,9 +53,9 @@ def _apply_section(defaults: dataclass, raw: dict, cls: type) -> object:
 
 
 def load_config() -> Config:
-    """Load config using local-first lookup: ./.perag/config.toml > ~/.perag/config.toml."""
+    """Load config: nearest-ancestor .perag/config.toml overrides ~/.perag/config.toml."""
     global_raw = _load_toml(Path.home() / ".perag" / "config.toml")
-    local_raw = _load_toml(Path.cwd() / ".perag" / "config.toml")
+    local_raw = _load_toml(find_perag_dir() / "config.toml")
 
     # Section-level replace: local section fully overrides global section
     embedding_raw = local_raw.get("embedding") or global_raw.get("embedding") or {}
@@ -67,10 +68,6 @@ def load_config() -> Config:
 
 
 def find_db_path() -> Path:
-    """Find the database path using local-first lookup."""
-    local = Path.cwd() / ".perag" / "perag.db"
-    if local.parent.exists():
-        return local
-    global_dir = Path.home() / ".perag"
-    global_dir.mkdir(parents=True, exist_ok=True)
-    return global_dir / "perag.db"
+    """Walk up from cwd to find the nearest .perag directory, then fall back to ~/.perag."""
+    perag_dir = find_perag_dir()
+    return perag_dir / "perag.db"
