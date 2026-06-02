@@ -135,14 +135,18 @@ a document fully replaces its previous chunks.
 perag chunk notes.md | perag embed | perag ingest
 ```
 
-### `perag query "<text>"`
+### `perag query [text]`
 
 Retrieves the most relevant chunks from the database for a given question.
+Query text can be passed as an argument or supplied via stdin — useful when the
+query is long or comes from a file.
 
 ```bash
 perag query "what is the notice period for termination?"
 perag query "budget for Q3" --json    # structured JSON output
 perag query "budget for Q3" --files   # filenames only, ordered by relevance
+perag query < question.txt            # read query from a file
+cat context.md | perag query          # pipe query text from another command
 ```
 
 `--files` returns deduplicated source filenames instead of chunk content, ordered by

@@ -94,6 +94,7 @@ was found in the knowledge base.
 ```bash
 perag query "question" --json    # structured output if needed
 perag query "question" --files   # filenames only, ordered by relevance
+perag query < question.txt       # read query text from a file (useful for long queries)
 ```
 
 ---

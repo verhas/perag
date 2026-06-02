@@ -706,14 +706,32 @@ def _ls_pipe(results: list[tuple[str, str]]) -> None:
 
 @app.command()
 def query(
-    text: Annotated[str, typer.Argument(help="Query text")],
+    text: Annotated[str | None, typer.Argument(help="Query text. Omit to read from stdin.")] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Output JSON instead of plain text")] = False,
     files: Annotated[bool, typer.Option("--files", "--file", is_eager=False, help="Output deduplicated source filenames instead of chunk content")] = False,
 ) -> None:
-    """Embed a query and retrieve the top-k matching chunks."""
+    """Embed a query and retrieve the top-k matching chunks.
+
+    Query text can be supplied as an argument or piped / redirected via stdin:
+
+        perag query "short question"
+        perag query < long_query.txt
+        cat notes.txt | perag query
+    """
     if json_output and files:
         err.print("[red]Error:[/red] --json and --files are mutually exclusive")
         raise typer.Exit(1)
+
+    if text is None:
+        if sys.stdin.isatty():
+            err.print("[red]Error:[/red] provide query text as an argument or pipe it via stdin.")
+            err.print("  Example: perag query \"what is the notice period?\"")
+            err.print("           perag query < query.txt")
+            raise typer.Exit(1)
+        text = sys.stdin.read().strip()
+        if not text:
+            err.print("[red]Error:[/red] stdin was empty — nothing to query.")
+            raise typer.Exit(1)
 
     cfg = load_config()
     db_path = find_db_path()
