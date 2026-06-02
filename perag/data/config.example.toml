@@ -8,3 +8,8 @@ batch_size = 32
 [query]
 top_k  = 5
 output = "text"                   # text | json
+
+[log]
+enabled = true
+level   = "warning"               # warning | info | debug
+# path  = "/custom/path/perag.log"  # default: <perag_dir>/perag.log

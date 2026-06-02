@@ -4,7 +4,10 @@ from pathlib import Path
 import pdfplumber
 
 from perag.chunkers.base import Chunker, md5
+from perag.log import get_logger
 from perag.schema import Chunk
+
+_log = get_logger("chunkers.pdf")
 
 _MIN_CHARS = 50
 
@@ -56,18 +59,20 @@ class PdfChunker(Chunker):
 
         if blank_pages:
             if len(blank_pages) == total_pages:
-                print(
-                    f"Warning: {path.name}: all {total_pages} pages have no extractable text — "
-                    "this PDF may be a scanned image and requires OCR to index.",
-                    file=sys.stderr,
+                msg = (
+                    f"{path.name}: all {total_pages} pages have no extractable text — "
+                    "this PDF may be a scanned image and requires OCR to index."
                 )
+                print(f"Warning: {msg}", file=sys.stderr)
+                _log.warning("%s", msg)
             else:
                 pages_str = ", ".join(str(p) for p in blank_pages)
-                print(
-                    f"Warning: {path.name}: {len(blank_pages)} page(s) had no extractable text "
+                msg = (
+                    f"{path.name}: {len(blank_pages)} page(s) had no extractable text "
                     f"and were skipped (pages: {pages_str}). "
-                    "Those pages may be scanned images and require OCR to index.",
-                    file=sys.stderr,
+                    "Those pages may be scanned images and require OCR to index."
                 )
+                print(f"Warning: {msg}", file=sys.stderr)
+                _log.warning("%s", msg)
 
         return chunks

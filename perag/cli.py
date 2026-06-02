@@ -19,7 +19,10 @@ class ChunkFormat(str, Enum):
     doc = "doc"
 
 from perag.config import find_db_path, load_config
+from perag.log import get_logger, setup as _setup_logging
 from perag.schema import Chunk
+
+_log = get_logger("cli")
 
 _VERSION = _pkg_version("perag")
 
@@ -43,7 +46,7 @@ def _main(
         typer.Option("--version", "-V", callback=_version_callback, is_eager=True, help="Show version and exit."),
     ] = None,
 ) -> None:
-    pass
+    _setup_logging()
 
 
 @app.command()
@@ -59,15 +62,19 @@ def chunk(
     for file in files:
         if not file.exists():
             err.print(f"[red]Error:[/red] file not found: {file}")
+            _log.warning("chunk: file not found: %s", file)
             failed = True
             continue
         try:
             chunks = get_chunker(file, as_format=as_format.value if as_format else None).chunk(file)
             all_chunks.extend(chunks)
+            _log.info("chunk: %s → %d chunk(s)", file.resolve(), len(chunks))
         except ValueError as e:
             err.print(f"[red]Error:[/red] {e}")
+            _log.warning("chunk: %s — %s", file, e)
             failed = True
 
+    _log.info("chunk: total %d chunk(s) from %d file(s)", len(all_chunks), len(files))
     print(json.dumps([c.to_dict() for c in all_chunks], ensure_ascii=False))
     if failed:
         raise typer.Exit(1)
@@ -102,7 +109,9 @@ def embed(
         print("[]")
         return
 
+    _log.info("embed: %d chunk(s) received from stdin", len(chunks))
     _embed_chunks(chunks, cfg)
+    _log.info("embed: %d chunk(s) written to stdout", len(chunks))
     print(json.dumps([c.to_dict() for c in chunks], ensure_ascii=False))
 
 
@@ -118,6 +127,7 @@ def ingest() -> None:
     chunks = [Chunk.from_dict(d) for d in raw]
     if not chunks:
         err.print("[yellow]Warning:[/yellow] no chunks to ingest")
+        _log.warning("ingest: no chunks received on stdin")
         return
 
     from perag.db.store import init_db, ingest as db_ingest
@@ -126,15 +136,19 @@ def ingest() -> None:
         conn = init_db(db_path)
     except RuntimeError as e:
         err.print(f"[red]Error:[/red] {e}")
+        _log.warning("ingest: db init failed: %s", e)
         raise typer.Exit(1)
     try:
         db_ingest(conn, chunks)
     except ValueError as e:
         err.print(f"[red]Error:[/red] {e}")
+        _log.warning("ingest: %s", e)
         raise typer.Exit(1)
     finally:
         conn.close()
 
+    sources = {c.source for c in chunks}
+    _log.info("ingest: %d chunk(s) for %d file(s) → %s", len(chunks), len(sources), db_path)
     err.print(f"[green]Ingested[/green] {len(chunks)} chunks into {db_path}")
 
 
@@ -160,6 +174,7 @@ def _embed_chunks(chunks: list[Chunk], cfg) -> list[Chunk]:
         from perag.config import find_perag_dir
         from perag.daemon_client import try_embed
         perag_dir = find_perag_dir()
+        _log.info("embed: requesting %d vector(s) from daemon (model=%s)", len(texts), cfg.embedding.model)
         with spinner("Embedding via daemon"):
             all_vectors = try_embed(
                 perag_dir, cfg.embedding.model, batch_size,
@@ -169,10 +184,12 @@ def _embed_chunks(chunks: list[Chunk], cfg) -> list[Chunk]:
 
     if len(all_vectors) != len(texts):
         all_vectors = []
+        _log.info("embed: loading model %s for in-process embedding", cfg.embedding.model)
         with spinner(f"Loading model {cfg.embedding.model}"):
             embedder.preload()
         n_batches = (len(texts) + batch_size - 1) // batch_size
         for batch_num, i in enumerate(range(0, len(texts), batch_size), start=1):
+            _log.debug("embed: batch %d/%d (%d texts)", batch_num, n_batches, len(texts[i : i + batch_size]))
             with spinner(f"Embedding {batch_num}/{n_batches}"):
                 all_vectors.extend(embedder.embed(texts[i : i + batch_size]))
 
@@ -200,18 +217,23 @@ def add_cmd(
     for file in files:
         if not file.exists():
             err.print(f"[red]Error:[/red] file not found: {file}")
+            _log.warning("add: file not found: %s", file)
             failed = True
             continue
         try:
-            all_chunks.extend(get_chunker(file, as_format=as_format.value if as_format else None).chunk(file))
+            chunks = get_chunker(file, as_format=as_format.value if as_format else None).chunk(file)
+            all_chunks.extend(chunks)
+            _log.info("add: %s → %d chunk(s)", file.resolve(), len(chunks))
         except ValueError as e:
             err.print(f"[red]Error:[/red] {e}")
+            _log.warning("add: %s — %s", file, e)
             failed = True
 
     if not all_chunks:
         if failed:
             raise typer.Exit(1)
         err.print("[yellow]Warning:[/yellow] no chunks produced")
+        _log.warning("add: no chunks produced from %d file(s)", len(files))
         return
 
     _embed_chunks(all_chunks, cfg)
@@ -221,17 +243,20 @@ def add_cmd(
         conn = init_db(db_path)
     except RuntimeError as e:
         err.print(f"[red]Error:[/red] {e}")
+        _log.warning("add: db init failed: %s", e)
         raise typer.Exit(1)
     try:
         db_ingest(conn, all_chunks)
     except ValueError as e:
         err.print(f"[red]Error:[/red] {e}")
+        _log.warning("add: %s", e)
         raise typer.Exit(1)
     finally:
         conn.close()
 
-    err.print(f"[green]Added[/green] {len(files) - (1 if failed else 0)} file(s), "
-              f"{len(all_chunks)} chunks → {db_path}")
+    n_ok = len(files) - (1 if failed else 0)
+    _log.info("add: %d file(s), %d chunk(s) → %s", n_ok, len(all_chunks), db_path)
+    err.print(f"[green]Added[/green] {n_ok} file(s), {len(all_chunks)} chunks → {db_path}")
     if failed:
         raise typer.Exit(1)
 
@@ -280,8 +305,10 @@ def init_cmd() -> None:
     with importlib.resources.as_file(skill_src) as src:
         shutil.copy(src, skill_dest)
     err.print(f"[green]Installed[/green] Claude Code skill → {skill_dest}")
+    _log.info("init: skill installed → %s", skill_dest)
 
     err.print(f"[green]Done.[/green] Database will be created at {perag_dir / 'perag.db'} on first ingest.")
+    _log.info("init: complete, perag_dir=%s", perag_dir)
 
 
 @app.command()
@@ -323,6 +350,11 @@ def config() -> None:
     table.add_row("query.top_k", str(cfg.query.top_k))
     table.add_row("query.output", cfg.query.output)
     table.add_row("database", str(db_path))
+    table.add_row("log.enabled", str(cfg.log.enabled))
+    table.add_row("log.level", cfg.log.level)
+    from perag.config import find_perag_dir as _find_perag_dir
+    log_path = cfg.log.path or str(_find_perag_dir() / "perag.log")
+    table.add_row("log.path", log_path)
 
     out.print(table)
 
@@ -428,6 +460,7 @@ def prune() -> None:
         conn = init_db(db_path)
     except RuntimeError as e:
         err.print(f"[red]Error:[/red] {e}")
+        _log.warning("prune: db init failed: %s", e)
         raise typer.Exit(1)
 
     try:
@@ -441,6 +474,8 @@ def prune() -> None:
 
     for source in pruned:
         err.print(f"[red]Pruned[/red] {source}")
+        _log.warning("prune: removed missing file: %s", source)
+    _log.info("prune: removed %d file(s) from %s", len(pruned), db_path)
     err.print(f"\n[green]Done.[/green] Removed {len(pruned)} file(s) from the database.")
 
 
@@ -475,6 +510,7 @@ def rm_cmd(
                 source = str(p.resolve())
                 if source not in file_records:
                     err.print(f"[red]Error:[/red] '{path_arg}' is not in the database")
+                    _log.warning("rm: '%s' not found in database", path_arg)
                     failed = True
                     continue
             else:
@@ -483,12 +519,14 @@ def rm_cmd(
                 matches = [s for s in sources if Path(s).parts[-len(p_parts):] == p_parts]
                 if not matches:
                     err.print(f"[red]Error:[/red] no database entry matching '{path_arg}'")
+                    _log.warning("rm: no match for '%s'", path_arg)
                     failed = True
                     continue
                 if len(matches) > 1:
                     err.print(f"[red]Error:[/red] '{path_arg}' is ambiguous — be more specific:")
                     for m in matches:
                         err.print(f"  {m}")
+                    _log.warning("rm: ambiguous match for '%s': %s", path_arg, matches)
                     failed = True
                     continue
                 source = matches[0]
@@ -497,8 +535,10 @@ def rm_cmd(
                         f"[yellow]Warning:[/yellow] '{source}' still exists on disk — "
                         "it will appear as NEW on the next scan."
                     )
+                    _log.warning("rm: '%s' removed from DB but file still exists on disk", source)
 
             n = remove_source(conn, source)
+            _log.info("rm: %s (%d chunk(s))", source, n)
             err.print(f"[green]Removed[/green] {source} ({n} chunk(s))")
     finally:
         conn.close()
@@ -537,7 +577,9 @@ def update(
 
     for source in pruned:
         err.print(f"[red]Pruned[/red] {source}")
+        _log.warning("update: pruned missing file: %s", source)
     if pruned:
+        _log.info("update: pruned %d missing file(s)", len(pruned))
         err.print(f"Removed {len(pruned)} missing file(s) from the database.")
 
     glob = "**/*" if recurse else "*"
@@ -557,10 +599,12 @@ def update(
     failed = False
     for file in stale:
         err.print(f"[yellow]Re-ingesting[/yellow] {file}")
+        _log.info("update: re-ingesting %s", file.resolve())
         try:
             all_chunks.extend(get_chunker(file).chunk(file))
         except ValueError as e:
             err.print(f"[red]Error:[/red] {e}")
+            _log.warning("update: %s — %s", file, e)
             failed = True
 
     if not all_chunks:
@@ -575,10 +619,12 @@ def update(
         db_ingest(conn, all_chunks)
     except (RuntimeError, ValueError) as e:
         err.print(f"[red]Error:[/red] {e}")
+        _log.warning("update: db error: %s", e)
         raise typer.Exit(1)
     finally:
         conn.close()
 
+    _log.info("update: %d file(s), %d chunk(s) → %s", len(stale), len(all_chunks), db_path)
     err.print(f"[green]Updated[/green] {len(stale)} file(s), {len(all_chunks)} chunks → {db_path}")
     if failed:
         raise typer.Exit(1)
@@ -738,7 +784,11 @@ def query(
 
     if not db_path.exists():
         err.print(f"[red]Error:[/red] no database found at {db_path}. Run `perag ingest` first.")
+        _log.warning("query: no database at %s", db_path)
         raise typer.Exit(1)
+
+    _log.info("query: %d chars", len(text))
+    _log.debug("query: text=%r", text)
 
     from perag.embedders.registry import get_embedder
     from perag.db.store import init_db
@@ -773,12 +823,14 @@ def query(
         conn = init_db(db_path)
     except RuntimeError as e:
         err.print(f"[red]Error:[/red] {e}")
+        _log.warning("query: db init failed: %s", e)
         raise typer.Exit(1)
     try:
         results = search(conn, vector, top_k=top_k)
     finally:
         conn.close()
 
+    _log.info("query: %d result(s)", len(results))
     if not results:
         err.print("[yellow]No results found.[/yellow]")
         return
