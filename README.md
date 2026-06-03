@@ -103,7 +103,8 @@ inspect intermediate output, use a custom chunker, or save embedded chunks to a 
 
 Creates a `.perag/` directory, writes a starter `config.toml`, adds `.perag/perag.db`
 to `.gitignore`, and installs the Claude Code skill into `~/.claude/skills/perag.md`.
-Safe to re-run — never overwrites an existing config.
+Safe to re-run — never overwrites an existing config or an existing skill file.
+Use `--reinstall-skill` to force the skill file to be overwritten.
 
 ### `perag chunk <file> [<file> ...]`
 
@@ -120,7 +121,10 @@ Supported formats: `.pdf` `.docx` `.doc` `.md` `.markdown` `.txt` `.text`
 ### `perag embed`
 
 Reads chunks from stdin, adds embedding vectors, writes JSON to stdout. Shows a
-spinner during model loading and embedding.
+spinner during model loading and embedding, and prints a summary line to stderr
+when complete. The local model (`all-MiniLM-L6-v2`, ~90 MB) is downloaded from
+HuggingFace Hub on first use and cached locally; subsequent runs load it from
+the cache without a network connection.
 
 ```bash
 perag chunk notes.md | perag embed

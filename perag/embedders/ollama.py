@@ -17,6 +17,17 @@ class OllamaEmbedder(Embedder):
         return "ollama"
 
     def embed(self, texts: list[str]) -> list[list[float]]:
+        # Try the newer batch endpoint (Ollama >= 0.1.28)
+        resp = httpx.post(
+            f"{self._url}/api/embed",
+            json={"model": self._model, "input": texts},
+            timeout=120,
+        )
+        if resp.status_code != 404:
+            resp.raise_for_status()
+            return resp.json()["embeddings"]
+
+        # Older Ollama: fall back to single-text endpoint
         vectors = []
         for text in texts:
             resp = httpx.post(

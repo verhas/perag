@@ -145,7 +145,8 @@ perag init
 ```
 
 This creates `.perag/config.toml`, registers `.perag/perag.db` in `.gitignore`,
-and installs this skill into `~/.claude/skills/perag.md`.
+and installs this skill into `~/.claude/skills/perag.md` (skips the skill file
+if it already exists — use `--reinstall-skill` to force overwrite).
 
 ---
 

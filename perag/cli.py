@@ -110,8 +110,12 @@ def embed(
         return
 
     _log.info("embed: %d chunk(s) received from stdin", len(chunks))
-    _embed_chunks(chunks, cfg)
+    n_embedded, n_passthrough = _embed_chunks(chunks, cfg)
     _log.info("embed: %d chunk(s) written to stdout", len(chunks))
+    if n_passthrough:
+        err.print(f"[dim]Embedded {n_embedded} chunk(s); {n_passthrough} already embedded (passed through).[/dim]")
+    else:
+        err.print(f"[dim]Embedded {n_embedded} chunk(s).[/dim]")
     print(json.dumps([c.to_dict() for c in chunks], ensure_ascii=False))
 
 
@@ -152,8 +156,12 @@ def ingest() -> None:
     err.print(f"[green]Ingested[/green] {len(chunks)} chunks into {db_path}")
 
 
-def _embed_chunks(chunks: list[Chunk], cfg) -> list[Chunk]:
-    """Embed chunks in-place, using the daemon when available. Returns the same list."""
+def _embed_chunks(chunks: list[Chunk], cfg) -> tuple[int, int]:
+    """Embed chunks in-place, using the daemon when available.
+
+    Returns (n_embedded, n_passthrough).
+    Raises typer.Exit(1) on model load or network failure.
+    """
     from perag.embedders.registry import get_embedder
     from perag.spinner import spinner
 
@@ -163,7 +171,7 @@ def _embed_chunks(chunks: list[Chunk], cfg) -> list[Chunk]:
         if c.embedding_model is None or c.embedding_model != embedder.model_name
     ]
     if not to_embed_idx:
-        return chunks
+        return 0, len(chunks)
 
     texts = [chunks[i].content for i in to_embed_idx]
     batch_size = cfg.embedding.batch_size
@@ -185,20 +193,37 @@ def _embed_chunks(chunks: list[Chunk], cfg) -> list[Chunk]:
     if len(all_vectors) != len(texts):
         all_vectors = []
         _log.info("embed: loading model %s for in-process embedding", cfg.embedding.model)
-        with spinner(f"Loading model {cfg.embedding.model}"):
-            embedder.preload()
+        if embedder.needs_preload:
+            cached = not (hasattr(embedder, "is_model_cached") and not embedder.is_model_cached())
+            msg = (
+                f"Loading model {cfg.embedding.model}"
+                if cached
+                else f"Downloading model {cfg.embedding.model} (~90 MB, first use only)"
+            )
+            try:
+                with spinner(msg):
+                    embedder.preload()
+            except RuntimeError as e:
+                err.print(f"[red]Error:[/red] {e}")
+                _log.error("embed: model load failed: %s", e)
+                raise typer.Exit(1)
         n_batches = (len(texts) + batch_size - 1) // batch_size
-        for batch_num, i in enumerate(range(0, len(texts), batch_size), start=1):
-            _log.debug("embed: batch %d/%d (%d texts)", batch_num, n_batches, len(texts[i : i + batch_size]))
-            with spinner(f"Embedding {batch_num}/{n_batches}"):
-                all_vectors.extend(embedder.embed(texts[i : i + batch_size]))
+        try:
+            for batch_num, i in enumerate(range(0, len(texts), batch_size), start=1):
+                _log.debug("embed: batch %d/%d (%d texts)", batch_num, n_batches, len(texts[i : i + batch_size]))
+                with spinner(f"Embedding {batch_num}/{n_batches}"):
+                    all_vectors.extend(embedder.embed(texts[i : i + batch_size]))
+        except RuntimeError as e:
+            err.print(f"[red]Error:[/red] {e}")
+            _log.error("embed: embedding failed: %s", e)
+            raise typer.Exit(1)
 
     for list_idx, chunk_idx in enumerate(to_embed_idx):
         chunks[chunk_idx].embedding_model = embedder.model_name
         chunks[chunk_idx].embedding_provider = embedder.provider_name
         chunks[chunk_idx].vector = all_vectors[list_idx]
 
-    return chunks
+    return len(to_embed_idx), len(chunks) - len(to_embed_idx)
 
 
 @app.command(name="add")
@@ -262,7 +287,9 @@ def add_cmd(
 
 
 @app.command(name="init")
-def init_cmd() -> None:
+def init_cmd(
+    reinstall_skill: Annotated[bool, typer.Option("--reinstall-skill", help="Overwrite an existing Claude Code skill file")] = False,
+) -> None:
     """Initialize a .perag/ directory in the current working directory."""
     import importlib.resources
     import shutil
@@ -301,11 +328,15 @@ def init_cmd() -> None:
     skills_dir = Path.home() / ".claude" / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
     skill_dest = skills_dir / "perag.md"
-    skill_src = importlib.resources.files("perag.data").joinpath("SKILL.md")
-    with importlib.resources.as_file(skill_src) as src:
-        shutil.copy(src, skill_dest)
-    err.print(f"[green]Installed[/green] Claude Code skill → {skill_dest}")
-    _log.info("init: skill installed → %s", skill_dest)
+    if skill_dest.exists() and not reinstall_skill:
+        err.print(f"[yellow]Already exists:[/yellow] {skill_dest} — use --reinstall-skill to overwrite")
+        _log.info("init: skill already installed at %s", skill_dest)
+    else:
+        skill_src = importlib.resources.files("perag.data").joinpath("SKILL.md")
+        with importlib.resources.as_file(skill_src) as src:
+            shutil.copy(src, skill_dest)
+        err.print(f"[green]Installed[/green] Claude Code skill → {skill_dest}")
+        _log.info("init: skill installed → %s", skill_dest)
 
     err.print(f"[green]Done.[/green] Database will be created at {perag_dir / 'perag.db'} on first ingest.")
     _log.info("init: complete, perag_dir=%s", perag_dir)
@@ -444,6 +475,8 @@ def status(
     fs_table.add_row("[red]missing[/red]",      f"[red]{n_missing}[/red]")
     fs_table.add_row("[cyan]new[/cyan]",        f"[cyan]{n_new}[/cyan]")
     out.print(fs_table)
+    if not recurse:
+        out.print("[dim](subdirectories not scanned — use --recurse / -R to include them)[/dim]")
 
 
 @app.command()
@@ -701,7 +734,7 @@ def ls_cmd(
                 results.append(("MISSING", source))
 
     if sys.stdout.isatty():
-        _ls_tty(results, db_entries=len(file_records))
+        _ls_tty(results, db_entries=len(file_records), recurse=recurse)
     else:
         _ls_pipe(results)
 
@@ -714,7 +747,7 @@ _STATUS_STYLE = {
 }
 
 
-def _ls_tty(results: list[tuple[str, str]], db_entries: int = 0) -> None:
+def _ls_tty(results: list[tuple[str, str]], db_entries: int = 0, recurse: bool = False) -> None:
     from rich.console import Console as RichConsole
     from rich.table import Table
 
@@ -724,6 +757,8 @@ def _ls_tty(results: list[tuple[str, str]], db_entries: int = 0) -> None:
         if db_entries:
             msg += f" [dim](database has {db_entries} file(s) — try a different path or -R)[/dim]"
         out.print(msg)
+        if not recurse:
+            out.print("[dim](subdirectories not scanned — use -R to include them)[/dim]")
         return
 
     table = Table(show_header=True, header_style="bold", box=None, pad_edge=False, show_edge=False)
@@ -743,6 +778,8 @@ def _ls_tty(results: list[tuple[str, str]], db_entries: int = 0) -> None:
         if s in counts
     )
     out.print(f"\n{summary}")
+    if not recurse:
+        out.print("[dim](subdirectories not scanned — use -R to include them)[/dim]")
 
 
 def _ls_pipe(results: list[tuple[str, str]]) -> None:
@@ -813,9 +850,26 @@ def query(
             vector = result[0]
 
     if vector is None:
-        with spinner(f"Loading model {cfg.embedding.model}"):
-            embedder.preload()
-        vector = embedder.embed([text])[0]
+        if embedder.needs_preload:
+            cached = not (hasattr(embedder, "is_model_cached") and not embedder.is_model_cached())
+            msg = (
+                f"Loading model {cfg.embedding.model}"
+                if cached
+                else f"Downloading model {cfg.embedding.model} (~90 MB, first use only)"
+            )
+            try:
+                with spinner(msg):
+                    embedder.preload()
+            except RuntimeError as e:
+                err.print(f"[red]Error:[/red] {e}")
+                _log.error("query: model load failed: %s", e)
+                raise typer.Exit(1)
+        try:
+            vector = embedder.embed([text])[0]
+        except RuntimeError as e:
+            err.print(f"[red]Error:[/red] {e}")
+            _log.error("query: embedding failed: %s", e)
+            raise typer.Exit(1)
 
     top_k = cfg.query.top_k * 4 if files else cfg.query.top_k
 

@@ -12,6 +12,11 @@ class Embedder(ABC):
     def provider_name(self) -> str:
         """Provider identifier stored in chunks and meta table."""
 
+    @property
+    def needs_preload(self) -> bool:
+        """True if preload() does real work (loads model weights locally)."""
+        return False
+
     def preload(self) -> None:
         """Pre-load model weights before embed(). No-op for API-based providers."""
 

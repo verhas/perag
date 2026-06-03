@@ -1,6 +1,6 @@
 # Future: Logging
 
-**Status:** planned
+**Status:** implemented 2026-06-02 in release 0.1.4
 
 ## Motivation
 

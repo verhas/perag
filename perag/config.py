@@ -1,6 +1,7 @@
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -53,7 +54,7 @@ def _load_toml(path: Path) -> dict:
         return tomllib.load(f)
 
 
-def _apply_section(defaults: dataclass, raw: dict, cls: type) -> object:
+def _apply_section(defaults: Any, raw: dict, cls: type) -> Any:
     """Replace entire section with raw values merged into defaults."""
     d = {k: getattr(defaults, k) for k in defaults.__dataclass_fields__}
     d.update(raw)
