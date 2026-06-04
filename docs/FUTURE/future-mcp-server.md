@@ -98,32 +98,49 @@ Chunks, embeds, and ingests one or more files.
 
 ### `perag_ls`
 
-Lists files and their status relative to the database.
+Lists files and their status relative to the database. Ignore rules (hardcoded
+exclusions, `.perag/ignore`, and optionally `.gitignore`) are applied automatically,
+matching the behaviour of the CLI.
 
 ```json
 {
   "name": "perag_ls",
-  "description": "List tracked files and their status (ok, stale, new, missing).",
+  "description": "List tracked files and their status (ok, stale, new, missing). Ignore rules are applied automatically.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "paths":   { "type": "array", "items": { "type": "string" } },
-      "filter":  { "type": "string", "enum": ["ok", "stale", "new", "missing"] },
-      "recurse": { "type": "boolean" }
+      "paths":     { "type": "array", "items": { "type": "string" }, "description": "Files or directories to scan (default: cwd)" },
+      "filter":    {
+        "type": "array",
+        "items": { "type": "string", "enum": ["ok", "stale", "new", "missing"] },
+        "description": "Show only these statuses (default: all). Multiple values are combined with OR."
+      },
+      "recurse":   { "type": "boolean", "description": "Recurse into subdirectories" },
+      "gitignore": { "type": "boolean", "description": "Apply .gitignore patterns (overrides [ls] use_gitignore config)" }
     }
   }
 }
 ```
 
+`filter` is an array so the caller can request multiple statuses in one call, mirroring
+the CLI's `perag ls --new --stale` behaviour. Omitting `filter` returns all statuses.
+
 ### `perag_status`
 
-Returns a summary of the collection.
+Returns a summary of the collection. With `full: true`, also scans the file system for
+stale, new, and missing file counts — ignore rules are applied to the disk scan.
 
 ```json
 {
   "name": "perag_status",
-  "description": "Return database statistics: file count, chunk count, model, last ingest.",
-  "inputSchema": { "type": "object", "properties": {} }
+  "description": "Return database statistics: file count, chunk count, model, last ingest. Pass full=true for file system counts.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "full":    { "type": "boolean", "description": "Include file system scan for stale/new/missing counts" },
+      "recurse": { "type": "boolean", "description": "Recurse into subdirectories when scanning (requires full=true)" }
+    }
+  }
 }
 ```
 
@@ -165,6 +182,14 @@ Removes one or more files from the database.
 ### `perag_prune`
 
 Removes database entries for files that no longer exist on disk.
+
+```json
+{
+  "name": "perag_prune",
+  "description": "Remove database entries for files that no longer exist on disk.",
+  "inputSchema": { "type": "object", "properties": {} }
+}
+```
 
 ## Tools deliberately not exposed
 
