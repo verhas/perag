@@ -134,6 +134,23 @@ def ingest() -> None:
         _log.warning("ingest: no chunks received on stdin")
         return
 
+    cfg = load_config()
+    if cfg.ingest.warn_ignored:
+        from perag.ignore import IgnoreChecker
+        from perag.config import find_perag_dir as _find_perag_dir
+        ignore = IgnoreChecker(_find_perag_dir(), cfg)
+        warned: set[str] = set()
+        for c in chunks:
+            if c.source not in warned:
+                rule = ignore.matching_rule(Path(c.source))
+                if rule:
+                    err.print(
+                        f"[yellow]Warning:[/yellow] {c.source} matches ignore rule "
+                        f"'{rule}' — ingesting anyway"
+                    )
+                    _log.warning("ingest: %s matches ignore rule '%s'", c.source, rule)
+                    warned.add(c.source)
+
     from perag.db.store import init_db, ingest as db_ingest
     db_path = find_db_path()
     try:
@@ -400,6 +417,7 @@ def status(
     from rich.table import Table
     from perag.db.store import get_stats, get_file_records, init_db
 
+    cfg = load_config()
     out = RichConsole()
     db_path = find_db_path()
 
@@ -445,12 +463,15 @@ def status(
     # Disk scan
     from perag.chunkers.base import md5
     from perag.chunkers.registry import SUPPORTED_EXTENSIONS
+    from perag.ignore import IgnoreChecker
+    from perag.config import find_perag_dir as _find_perag_dir
 
+    ignore = IgnoreChecker(_find_perag_dir(), cfg)
     glob = "**/*" if recurse else "*"
     disk_files = {
         str(f.resolve())
         for f in Path.cwd().glob(glob)
-        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
+        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS and not ignore.is_ignored(f.resolve())
     }
 
     n_ok = n_stale = n_new = n_missing = 0
@@ -615,11 +636,16 @@ def update(
         _log.info("update: pruned %d missing file(s)", len(pruned))
         err.print(f"Removed {len(pruned)} missing file(s) from the database.")
 
+    from perag.ignore import IgnoreChecker
+    from perag.config import find_perag_dir as _find_perag_dir
+    ignore = IgnoreChecker(_find_perag_dir(), cfg)
+
     glob = "**/*" if recurse else "*"
     stale: list[Path] = [
         f for f in sorted(Path.cwd().glob(glob))
         if f.is_file()
         and f.suffix.lower() in SUPPORTED_EXTENSIONS
+        and not ignore.is_ignored(f.resolve())
         and str(f.resolve()) in file_records
         and md5(f) != file_records[str(f.resolve())]
     ]
@@ -671,11 +697,13 @@ def ls_cmd(
     ok: Annotated[bool, typer.Option("--ok", "-o", help="Show files that are up to date")] = False,
     missing: Annotated[bool, typer.Option("--missing", "-m", help="Show database entries whose file no longer exists")] = False,
     recurse: Annotated[bool, typer.Option("--recurse", "-R", help="Recurse into directories")] = False,
+    gitignore: Annotated[bool | None, typer.Option("--gitignore/--no-gitignore", help="Apply .gitignore rules (overrides config)")] = None,
 ) -> None:
     """List files and their status relative to the database."""
     from perag.chunkers.base import md5
     from perag.chunkers.registry import SUPPORTED_EXTENSIONS
     from perag.db.store import get_file_records, init_db
+    from perag.ignore import IgnoreChecker
 
     # No flags → show everything
     any_flag = new or stale or ok or missing
@@ -683,6 +711,10 @@ def ls_cmd(
     show_stale   = stale   or not any_flag
     show_ok      = ok      or not any_flag
     show_missing = missing or not any_flag
+
+    cfg = load_config()
+    from perag.config import find_perag_dir as _find_perag_dir
+    ignore = IgnoreChecker(_find_perag_dir(), cfg, use_gitignore=gitignore)
 
     # Load DB records
     db_path = find_db_path()
@@ -706,7 +738,7 @@ def ls_cmd(
         elif path.is_dir():
             glob = "**/*" if recurse else "*"
             for f in sorted(path.glob(glob)):
-                if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS:
+                if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS and not ignore.is_ignored(f.resolve()):
                     disk_files.append(str(f))
         else:
             err.print(f"[yellow]Warning:[/yellow] path not found: {path}")

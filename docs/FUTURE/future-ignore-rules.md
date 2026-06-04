@@ -1,5 +1,5 @@
 # Future: Ignore Rules
-**Status:** planned
+**Status:** implemented in 0.1.6
 
 ## Problem
 

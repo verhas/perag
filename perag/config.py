@@ -30,10 +30,23 @@ class LogConfig:
 
 
 @dataclass
+class LsConfig:
+    hardcoded_exclusions: bool = True
+    use_gitignore: bool = False
+
+
+@dataclass
+class IngestConfig:
+    warn_ignored: bool = True
+
+
+@dataclass
 class Config:
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     query: QueryConfig = field(default_factory=QueryConfig)
     log: LogConfig = field(default_factory=LogConfig)
+    ls: LsConfig = field(default_factory=LsConfig)
+    ingest: IngestConfig = field(default_factory=IngestConfig)
 
 
 def find_perag_dir() -> Path:
@@ -70,12 +83,16 @@ def load_config() -> Config:
     embedding_raw = local_raw.get("embedding") or global_raw.get("embedding") or {}
     query_raw = local_raw.get("query") or global_raw.get("query") or {}
 
-    log_raw = local_raw.get("log") or global_raw.get("log") or {}
+    log_raw    = local_raw.get("log")    or global_raw.get("log")    or {}
+    ls_raw     = local_raw.get("ls")     or global_raw.get("ls")     or {}
+    ingest_raw = local_raw.get("ingest") or global_raw.get("ingest") or {}
 
     return Config(
         embedding=_apply_section(EmbeddingConfig(), embedding_raw, EmbeddingConfig),
         query=_apply_section(QueryConfig(), query_raw, QueryConfig),
         log=_apply_section(LogConfig(), log_raw, LogConfig),
+        ls=_apply_section(LsConfig(), ls_raw, LsConfig),
+        ingest=_apply_section(IngestConfig(), ingest_raw, IngestConfig),
     )
 
 

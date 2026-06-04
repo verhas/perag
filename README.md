@@ -160,7 +160,9 @@ suitable for use with `$()` or wiki-style navigation.
 ### `perag ls [paths...] [flags]`
 
 Lists files and their status relative to the database. When piped, outputs one
-filename per line — suitable for use with `$()`.
+filename per line — suitable for use with `$()`. Ignore rules are applied
+automatically — `.venv/`, `node_modules/`, `.git/`, and other build/tooling
+directories are excluded from the scan by default (see [Ignore rules](#ignore-rules)).
 
 ```bash
 perag ls                  # all files: ok, stale, new, missing
@@ -171,6 +173,8 @@ perag ls --missing        # in database but deleted from disk
 perag ls --recurse        # recurse into subdirectories (short: -R)
 perag ls --new --stale    # combine flags (OR)
 perag ls docs/ *.md       # scan specific paths
+perag ls --gitignore      # also apply .gitignore patterns
+perag ls --no-gitignore   # disable .gitignore for this run (overrides config)
 ```
 
 ### `perag status`
@@ -274,6 +278,96 @@ Only specify what differs from the global config:
 ```toml
 [embedding]
 model = "all-mpnet-base-v2"      # higher quality for this project
+```
+
+---
+
+## Ignore rules
+
+`perag ls`, `perag status --full`, and `perag update` scan the file system for
+supported documents. Without filtering they would surface files inside virtual
+environments, build directories, IDE metadata, and version control internals —
+none of which are user documents. Ignore rules prevent this.
+
+Three layers are applied in order. Each layer is independent.
+
+### Layer 1 — Hardcoded exclusions (on by default)
+
+A built-in list of directories and file patterns that are never user documents:
+
+| Category | Excluded |
+|---|---|
+| Version control | `.git/` `.hg/` `.svn/` `.bzr/` |
+| Python | `.venv/` `venv/` `env/` `ENV/` `__pycache__/` `.eggs/` `.tox/` `.mypy_cache/` `.pytest_cache/` `.ruff_cache/` `*.egg-info/` |
+| JavaScript | `node_modules/` `.npm/` `.yarn/` `.next/` `.nuxt/` |
+| Build / output | `dist/` `build/` `target/` `out/` `bin/` `obj/` `_site/` |
+| IDE / editors | `.idea/` `.vscode/` `.vs/` |
+| OS / Docker | `.DS_Store` `Thumbs.db` `.cache/` `.docker/` |
+| Ruby | `.bundle/` `vendor/bundle/` |
+| File patterns | `*.pyc` `*.pyo` `*.class` `*.jar` `*.war` `*.iml` |
+
+To disable the built-in list entirely (you take responsibility for what is scanned):
+
+```toml
+[ls]
+hardcoded_exclusions = false
+```
+
+### Layer 2 — `.perag/ignore`
+
+Create a file at `.perag/ignore` using the same syntax as `.gitignore` — glob
+patterns, `#` comments, and `!` negation are all supported. The file is read
+whenever it exists; its presence is the opt-in.
+
+```
+# .perag/ignore
+
+# Do not index draft documents
+drafts/
+*-draft.pdf
+
+# Do not index raw data exports
+data/raw/
+```
+
+There is no config option to disable this layer — delete or rename the file to
+stop using it.
+
+### Layer 3 — `.gitignore` (opt-in)
+
+When enabled, perag reads the project's `.gitignore` and the global git ignore
+file (`~/.gitignore_global` or `~/.config/git/ignore`) and applies their
+patterns during file scanning.
+
+Enable via config:
+
+```toml
+[ls]
+use_gitignore = true
+```
+
+Or override per invocation:
+
+```bash
+perag ls --gitignore       # enable for this run
+perag ls --no-gitignore    # disable for this run
+```
+
+### Ingest warning
+
+When `perag ingest` receives a chunk whose source path matches an active ignore
+rule, it prints a warning to stderr and continues:
+
+```
+Warning: /path/to/file.txt matches ignore rule '.venv/' — ingesting anyway
+```
+
+This catches files that bypassed `perag ls` by being passed directly to
+`perag chunk`. To suppress the warning:
+
+```toml
+[ingest]
+warn_ignored = false
 ```
 
 ---

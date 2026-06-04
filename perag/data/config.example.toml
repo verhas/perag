@@ -13,3 +13,10 @@ output = "text"                   # text | json
 enabled = true
 level   = "warning"               # warning | info | debug
 # path  = "/custom/path/perag.log"  # default: <perag_dir>/perag.log
+
+[ls]
+hardcoded_exclusions = true   # exclude .venv/, node_modules/, .git/, dist/, etc.
+# use_gitignore = false       # also apply .gitignore and global git ignore patterns
+
+[ingest]
+# warn_ignored = true         # warn when ingesting a file that matches an ignore rule
