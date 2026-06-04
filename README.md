@@ -338,3 +338,11 @@ uv run pytest
 ```
 
 Requires Python 3.11+.
+
+---
+
+## License
+
+`perag` is dual-licensed under the **Apache License 2.0** (`LICENSE`) and the
+**MIT License** (`LICENSE-MIT`). You may choose either license when using,
+modifying, or distributing this software.

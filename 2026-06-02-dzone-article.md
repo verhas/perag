@@ -47,6 +47,11 @@ open, no project to register. You `cd` into a directory and `perag` treats that
 directory as your collection. Switch directories and you switch collections — the same
 mental model as `git`.
 
+Architecturally, `perag` is a UNIX pipeline. The three stages — chunk, embed, ingest
+— are separate processes that communicate via a defined JSON format on stdin and stdout.
+`perag add` is a shortcut for the full pipeline; the pipeline itself is the extension
+point. Any tool that reads or writes the JSON format can participate.
+
 `perag` integrates with Claude Code by installing a skill file that teaches the
 assistant how to query and ingest documents on your behalf. You talk to your assistant
 naturally; it runs `perag` in the background.
@@ -74,6 +79,13 @@ Add your documents:
 ```bash
 perag add report.pdf notes.md contract.docx
 # Added 3 file(s), 47 chunks → .perag/perag.db
+```
+
+`perag add` is a one-step shortcut. When you want to see what is happening — or
+substitute your own chunker or embedder — you run the pipeline explicitly:
+
+```bash
+perag chunk contract.docx | perag embed | perag ingest
 ```
 
 That is it. Now ask your AI assistant a question about the contract:
@@ -156,6 +168,76 @@ as long as you re-embed after switching.
 
 ---
 
+## Open by Design
+
+The three pipeline stages communicate via a documented JSON format. Each chunk flowing
+between stages looks like this:
+
+```json
+{
+  "id":       "contracts/nda_2024.pdf::chunk::7",
+  "source":   "contracts/nda_2024.pdf",
+  "content":  "The agreement shall terminate upon 30 days written notice...",
+  "metadata": { "format": "pdf", "page": 3, "section": "Termination" },
+  "embedding_model":    null,
+  "embedding_provider": null,
+  "vector":             null
+}
+```
+
+After `perag chunk`, the embedding fields are `null`. After `perag embed`, they are
+populated. After `perag ingest`, the chunks are stored. Any tool that reads or writes
+this format can replace or extend any stage.
+
+### Custom chunkers
+
+If your organisation uses a proprietary document format — a legacy system export, a
+structured XML schema, an internal binary — you can write a chunker in any language
+that outputs this JSON to stdout:
+
+```bash
+my-proprietary-chunker legal-brief.prp | perag embed | perag ingest
+```
+
+The chunker does not need to be Python. It does not need to know anything about
+embeddings or databases. It only needs to produce JSON chunks.
+
+### Custom embedders
+
+If your organisation runs an internal embedding API — for data governance, compliance,
+or because you have a domain-specific model fine-tuned on your corpus — you can replace
+`perag embed` with your own:
+
+```bash
+perag chunk document.pdf | my-internal-embedder | perag ingest
+```
+
+Your embedder reads the JSON array from stdin, calls whatever API it needs, populates
+the `vector`, `embedding_model`, and `embedding_provider` fields, and writes the result
+back to stdout. `perag ingest` does not care where the vectors came from.
+
+### Intermediate inspection
+
+Because each stage writes to stdout, you can examine the output of any stage before it
+reaches the next:
+
+```bash
+perag chunk report.pdf       > chunks.json
+perag embed  < chunks.json   > embedded.json
+perag ingest < embedded.json
+```
+
+This is useful when tuning a custom chunker: run it in isolation, inspect the JSON, and
+feed it through the rest of the pipeline only when the output looks right. It is also
+useful for saving embeddings to a file and re-ingesting them after switching models —
+`perag embed` detects already-embedded chunks and skips them automatically.
+
+The UNIX pipeline design means `perag` is not a closed system you configure, but an
+open one you extend. The built-in chunkers and embedders cover the common cases; the
+pipe interface and the JSON contract cover everything else.
+
+---
+
 ## What Is Coming
 
 `perag` is at version 0.1.x. The foundation is stable; the roadmap is ambitious.
@@ -198,5 +280,6 @@ Then ask your AI assistant a question about your documents.
 
 Source code and documentation: [github.com/verhas/perag](https://github.com/verhas/perag)
 
-`perag` is MIT licensed, written in Python, and requires Python 3.11 or later.
-Feedback and contributions are welcome.
+`perag` is dual-licensed under Apache 2.0 and MIT — use whichever suits your project.
+It is written in Python and requires Python 3.11 or later. Feedback and contributions
+are welcome.

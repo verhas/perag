@@ -9,21 +9,46 @@ def _make_chunk(i: int = 0) -> Chunk:
     return Chunk(id=f"test::chunk::{i}", source="test.txt", content=f"Text {i}", metadata={})
 
 
-def test_ollama_embedder_calls_api():
+def test_ollama_embedder_calls_batch_api():
     import httpx
     from perag.embedders.ollama import OllamaEmbedder
 
     embedder = OllamaEmbedder(model="nomic-embed-text", url="http://localhost:11434")
 
     mock_resp = MagicMock()
-    mock_resp.json.return_value = {"embedding": [0.1, 0.2, 0.3]}
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"embeddings": [[0.1, 0.2, 0.3]]}
     mock_resp.raise_for_status = MagicMock()
 
     with patch.object(httpx, "post", return_value=mock_resp) as mock_post:
         vectors = embedder.embed(["hello world"])
 
     assert vectors == [[0.1, 0.2, 0.3]]
-    mock_post.assert_called_once()
+    call_url = mock_post.call_args[0][0]
+    assert call_url.endswith("/api/embed")
+
+
+def test_ollama_embedder_falls_back_to_legacy_api():
+    import httpx
+    from perag.embedders.ollama import OllamaEmbedder
+
+    embedder = OllamaEmbedder(model="nomic-embed-text", url="http://localhost:11434")
+
+    legacy_resp = MagicMock()
+    legacy_resp.status_code = 200
+    legacy_resp.json.return_value = {"embedding": [0.1, 0.2, 0.3]}
+    legacy_resp.raise_for_status = MagicMock()
+
+    not_found_resp = MagicMock()
+    not_found_resp.status_code = 404
+
+    with patch.object(httpx, "post", side_effect=[not_found_resp, legacy_resp]) as mock_post:
+        vectors = embedder.embed(["hello world"])
+
+    assert vectors == [[0.1, 0.2, 0.3]]
+    assert mock_post.call_count == 2
+    assert mock_post.call_args_list[0][0][0].endswith("/api/embed")
+    assert mock_post.call_args_list[1][0][0].endswith("/api/embeddings")
 
 
 def test_openai_embedder_calls_api():
